@@ -14,6 +14,8 @@
     <TargetFrameworkProfile />
     <SolutionDir Condition="$(SolutionDir) == '' Or $(SolutionDir) == '*Undefined*'">..\</SolutionDir>
     <RestorePackages>true</RestorePackages>
+    <SignAssembly>true</SignAssembly>
+    <AssemblyOriginatorKeyFile>..\..\build\datastax.snk</AssemblyOriginatorKeyFile>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>true</DebugSymbols>
@@ -42,8 +44,9 @@
     <Reference Include="nunit.framework">
       <HintPath>..\packages\NUnit.2.6.3\lib\nunit.framework.dll</HintPath>
     </Reference>
-    <Reference Include="Renci.SshNet">
-      <HintPath>..\packages\SSH.NET.2013.4.7\lib\net40\Renci.SshNet.dll</HintPath>
+    <Reference Include="Renci.SshNet, Version=2014.4.6.0, Culture=neutral, PublicKeyToken=1cee9f8bde3db106, processorArchitecture=MSIL">
+      <SpecificVersion>False</SpecificVersion>
+      <HintPath>..\packages\SSH.NET.2014.4.6-beta2\lib\net40\Renci.SshNet.dll</HintPath>
     </Reference>
     <Reference Include="System" />
     <Reference Include="System.configuration" />
@@ -55,30 +58,58 @@
     <Compile Include="..\SharedAssemblyInfo.cs">
       <Link>Properties\SharedAssemblyInfo.cs</Link>
     </Compile>
+    <Compile Include="Core\ClientTimeoutTests.cs" />
+    <Compile Include="Core\ClientWarningsTests.cs" />
+    <Compile Include="Core\ControlConnectionReconnectionTests.cs" />
+    <Compile Include="Core\ControlConnectionTests.cs" />
+    <Compile Include="Core\CustomPayloadTests.cs" />
+    <Compile Include="Core\UdfTests.cs" />
+    <Compile Include="Core\SpeculativeExecutionLongTests.cs" />
+    <Compile Include="Core\SpeculativeExecutionShortTests.cs" />
+    <Compile Include="CqlFunctions\Structures\EntityWithNullableTimeUuid.cs" />
+    <Compile Include="CqlFunctions\Structures\EntityWithTimeUuid.cs" />
+    <Compile Include="CqlFunctions\Tests\MaxTimeUuid.cs" />
+    <Compile Include="CqlFunctions\Tests\MinTimeUuid.cs" />
+    <Compile Include="CqlFunctions\Tests\Token.cs" />
+    <Compile Include="Linq\CqlOperatorTests\Prepend.cs" />
+    <Compile Include="Linq\CqlOperatorTests\SubstractAssign.cs" />
+    <Compile Include="Linq\CqlOperatorTests\Append.cs" />
+    <Compile Include="Linq\LinqMethods\Count.cs" />
+    <Compile Include="Linq\LinqMethods\Counter.cs" />
+    <Compile Include="Linq\LinqMethods\ExecutePagedTests.cs" />
+    <Compile Include="Linq\LinqTable\CreateTable.cs" />
+    <Compile Include="Linq\LinqMethods\Delete.cs" />
+    <Compile Include="Linq\LinqMethods\DeleteIf.cs" />
+    <Compile Include="Linq\LinqMethods\First.cs" />
+    <Compile Include="Linq\LinqMethods\FirstOrDefault.cs" />
+    <Compile Include="Linq\LinqMethods\InsertTests.cs" />
+    <Compile Include="Linq\LinqTable\LinqUdtTests.cs" />
+    <Compile Include="Linq\LinqMethods\OrderBy.cs" />
+    <Compile Include="Linq\LinqMethods\Select.cs" />
+    <Compile Include="Linq\LinqMethods\TableSelectDefault.cs" />
+    <Compile Include="Linq\LinqMethods\Take.cs" />
+    <Compile Include="Linq\LinqMethods\Update.cs" />
+    <Compile Include="Linq\LinqMethods\UpdateIfTests.cs" />
+    <Compile Include="Linq\LinqMethods\Where.cs" />
+    <Compile Include="Linq\LinqTable\GetTable.cs" />
+    <Compile Include="Linq\LinqTable\TableSelectDefault.cs" />
     <Compile Include="Linq\Structures\AllDataTypesEntityBase.cs" />
+    <Compile Include="Linq\Structures\AllDataTypesEntityUtil.cs" />
+    <Compile Include="Linq\Structures\EntityWithAllCollectionTypes.cs" />
+    <Compile Include="Linq\Structures\EntityWithArrayType.cs" />
+    <Compile Include="Linq\Structures\EntityWithDictionaryType.cs" />
+    <Compile Include="Linq\Structures\EntityWithListType.cs" />
     <Compile Include="Linq\Structures\IAllDataTypesEntity.cs" />
+    <Compile Include="Core\CollectionsNestedTests.cs" />
+    <Compile Include="Linq\Structures\ManyDataTypesEntity.cs" />
+    <Compile Include="SharedClusterTest.cs" />
     <Compile Include="Linq\Structures\SalesOrder.cs" />
-    <Compile Include="Linq\Tests\Counter.cs" />
-    <Compile Include="Linq\Tests\DeleteIf.cs" />
-    <Compile Include="Linq\Tests\Delete.cs" />
-    <Compile Include="Linq\Tests\LinqUdtTests.cs" />
-    <Compile Include="Linq\Tests\Select.cs" />
-    <Compile Include="Linq\Tests\Insert.cs" />
-    <Compile Include="Linq\Tests\Update.cs" />
     <Compile Include="Linq\Structures\AllDataTypesNoColumnMeta.cs" />
     <Compile Include="Linq\Structures\Movie.cs" />
-    <Compile Include="Linq\Tests\TableSelectDefault.cs" />
-    <Compile Include="Linq\Tests\Count.cs" />
-    <Compile Include="Linq\Tests\CreateTable.cs" />
     <Compile Include="Linq\Structures\AllDataTypesEntity.cs" />
-    <Compile Include="Linq\Tests\First.cs" />
-    <Compile Include="Linq\Tests\FirstOrDefault.cs" />
-    <Compile Include="Linq\Tests\Take.cs" />
-    <Compile Include="Linq\Tests\UpdateIf.cs" />
-    <Compile Include="Linq\Tests\Where.cs" />
-    <Compile Include="Linq\Tests\OrderBy.cs" />
     <Compile Include="Mapping\Structures\ContactMethod.cs" />
     <Compile Include="Mapping\Structures\ManyDataTypesPocoMappingCaseSensitive.cs" />
+    <Compile Include="Mapping\Structures\NestedCollectionsPoco.cs" />
     <Compile Include="Mapping\Structures\UserMapping.cs" />
     <Compile Include="Mapping\Structures\RainbowColor.cs" />
     <Compile Include="Mapping\Structures\User.cs" />
@@ -89,34 +120,38 @@
     <Compile Include="Mapping\Tests\CqlClientTest.cs" />
     <Compile Include="Mapping\Tests\CqlClientConfig.cs" />
     <Compile Include="Mapping\Tests\CreateTable.cs" />
+    <Compile Include="Mapping\Tests\Delete.cs" />
     <Compile Include="Mapping\Tests\Fetch.cs" />
+    <Compile Include="Mapping\Tests\First.cs" />
     <Compile Include="Mapping\Tests\FluentMapping.cs" />
-    <Compile Include="Mapping\Tests\Insert.cs" />
+    <Compile Include="Mapping\Tests\InsertTests.cs" />
+    <Compile Include="Mapping\Tests\Single.cs" />
+    <Compile Include="Mapping\Tests\Update.cs" />
     <Compile Include="TestBase\TestCategories.cs" />
     <Compile Include="Core\ConnectionTests.cs" />
-    <Compile Include="Core\ConsistencyShortTests.cs" />
+    <Compile Include="Core\ConsistencyTests.cs" />
     <Compile Include="Core\MultiThreadingTests.cs" />
     <Compile Include="Core\BasicTypeTests.cs" />
     <Compile Include="Core\BatchStatements.cs" />
     <Compile Include="Core\CollectionsTests.cs" />
     <Compile Include="Core\ConnectionTimeoutTest.cs" />
-    <Compile Include="Policies\ConsistencyTests.cs" />
+    <Compile Include="Policies\Tests\ConsistencyTests.cs" />
     <Compile Include="Core\CustomTypeTests.cs" />
     <Compile Include="Core\ExceptionsTests.cs" />
     <Compile Include="FoundBugs\FoundBugTests.cs" />
     <Compile Include="Core\LargeDataTests.cs" />
-    <Compile Include="Policies\LoadBalancingPolicyTests.cs" />
+    <Compile Include="Policies\Tests\LoadBalancingPolicyTests.cs" />
     <Compile Include="Core\MetadataTests.cs" />
-    <Compile Include="Policies\AlwaysIgnoreRetryPolicy.cs" />
-    <Compile Include="Policies\AlwaysRetryRetryPolicy.cs" />
-    <Compile Include="Policies\PolicyTestTools.cs" />
+    <Compile Include="Policies\Util\AlwaysIgnoreRetryPolicy.cs" />
+    <Compile Include="Policies\Util\AlwaysRetryRetryPolicy.cs" />
+    <Compile Include="Policies\Util\PolicyTestTools.cs" />
+    <Compile Include="Policies\Util\TryNextHostRetryPolicy.cs" />
     <Compile Include="Core\PoolTests.cs" />
     <Compile Include="Core\PreparedStatementsTests.cs" />
     <Compile Include="TestBase\QueryTools.cs" />
     <Compile Include="TestBase\Randomm.cs" />
-    <Compile Include="Policies\ReconnectionPolicyTests.cs" />
-    <Compile Include="Core\RequestHandlerTests.cs" />
-    <Compile Include="Policies\RetryPolicyTests.cs" />
+    <Compile Include="Policies\Tests\ReconnectionPolicyTests.cs" />
+    <Compile Include="Policies\Tests\RetryPolicyTests.cs" />
     <Compile Include="Core\SessionAuthenticationTests.cs" />
     <Compile Include="Core\SessionExecuteAsyncTests.cs" />
     <Compile Include="Core\SessionTests.cs" />
@@ -127,10 +162,8 @@
     <Compile Include="Ado\AdoBasicTests.cs" />
     <Compile Include="TestClusterManagement\CcmBridge.cs" />
     <Compile Include="TestClusterManagement\CcmCluster.cs" />
-    <Compile Include="TestClusterManagement\CToolBridge.cs" />
     <Compile Include="TestBase\Options.cs" />
-    <Compile Include="TestSuiteBase.cs" />
-    <Compile Include="TestClusterManagement\CToolCluster.cs" />
+    <Compile Include="CommonFixtureSetup.cs" />
     <Compile Include="TestClusterManagement\ITestCluster.cs" />
     <Compile Include="TestClusterManagement\TestClusterManager.cs" />
     <Compile Include="TestBase\TestGlobals.cs" />

@@ -35,20 +35,21 @@ namespace Cassandra.Data.Linq
             _mapperFactory = mapperFactory;
         }
 
-        public CqlInsert<TEntity> IfNotExists()
+        public CqlConditionalCommand<TEntity> IfNotExists()
         {
             _ifNotExists = true;
-            return this;
+            return new CqlConditionalCommand<TEntity>(this, _mapperFactory);
         }
 
-        protected override string GetCql(out object[] values)
+        protected internal override string GetCql(out object[] values)
         {
             var getBindValues = _mapperFactory.GetValueCollector<TEntity>("INSERT ALL LINQ");
+            //Use a list of parameters as additional parameters may be included (ttl / timestamp)
             var parameters = new List<object>(getBindValues(_entity));
             var visitor = new CqlExpressionVisitor(PocoData, Table.Name, Table.KeyspaceName);
             var cql = visitor.GetInsert(_entity, _ifNotExists, _ttl, _timestamp, parameters);
             values = parameters.ToArray();
-            return cql;
+            return cql; 
         }
 
         internal string GetCqlAndValues(out object[] values)

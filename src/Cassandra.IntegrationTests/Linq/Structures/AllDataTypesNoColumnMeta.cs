@@ -19,6 +19,7 @@ using System.Collections.Generic;
 using Cassandra.Data.Linq;
 using Cassandra.IntegrationTests.TestBase;
 using NUnit.Framework;
+#pragma warning disable 618
 
 namespace Cassandra.IntegrationTests.Linq.Structures
 {
@@ -36,6 +37,8 @@ namespace Cassandra.IntegrationTests.Linq.Structures
         public Guid GuidType { get; set; }
 
         public DateTime DateTimeType { get; set; }
+
+        public DateTime? NullableDateTimeType { get; set; }
 
         public DateTimeOffset DateTimeOffsetType { get; set; }
 

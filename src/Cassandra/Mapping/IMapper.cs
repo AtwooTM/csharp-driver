@@ -5,6 +5,7 @@ namespace Cassandra.Mapping
     /// <summary>
     /// A client for creating, updating, deleting, and reading POCOs from a Cassandra cluster.
     /// </summary>
+    /// <seealso cref="Mapper"/>
     public interface IMapper : ICqlQueryAsyncClient, ICqlWriteAsyncClient, ICqlQueryClient, ICqlWriteClient
     {
         /// <summary>
@@ -32,5 +33,112 @@ namespace Cassandra.Mapping
         /// <param name="value">The value to convert.</param>
         /// <returns>The converted value.</returns>
         TDatabase ConvertCqlArgument<TValue, TDatabase>(TValue value);
+
+        //Lightweight transaction support methods must be included at IMapper level as 
+        //  conditional queries are not supported in batches
+
+        /// <summary>
+        /// Deletes from the table for the POCO type specified (T) using the CQL string specified and query parameters specified.  
+        /// Prepends "DELETE FROM tablename " to the CQL statement you specify, getting the tablename appropriately from the POCO Type T.
+        /// <para>
+        /// Returns information whether it was applied or not. If it was not applied, it returns details of the existing values.
+        /// </para>
+        /// </summary>
+        AppliedInfo<T> DeleteIf<T>(string cql, params object[] args);
+
+        /// <summary>
+        /// Deletes from the table for the POCO type specified (T) using the Cql query specified.  
+        /// Prepends "DELETE FROM tablename " to the CQL statement you specify, getting the tablename appropriately from the POCO Type T.
+        /// <para>
+        /// Returns information whether it was applied or not. If it was not applied, it returns details of the existing values.
+        /// </para>
+        /// </summary>
+        AppliedInfo<T> DeleteIf<T>(Cql cql);
+
+        /// <summary>
+        /// Deletes from the table for the POCO type specified (T) using the CQL string specified and query parameters specified.  
+        /// Prepends "DELETE FROM tablename " to the CQL statement you specify, getting the tablename appropriately from the POCO Type T.
+        /// <para>
+        /// Returns information whether it was applied or not. If it was not applied, it returns details of the existing values.
+        /// </para>
+        /// </summary>
+        Task<AppliedInfo<T>> DeleteIfAsync<T>(string cql, params object[] args);
+
+        /// <summary>
+        /// Deletes from the table for the POCO type specified (T) using the Cql query specified.  
+        /// Prepends "DELETE FROM tablename " to the CQL statement you specify, getting the tablename appropriately from the POCO Type T.
+        /// <para>
+        /// Returns information whether it was applied or not. If it was not applied, it returns details of the existing values.
+        /// </para>
+        /// </summary>
+        Task<AppliedInfo<T>> DeleteIfAsync<T>(Cql cql);
+
+        /// <summary>
+        /// Inserts the specified POCO in Cassandra, if not exists.
+        /// <para>
+        /// Returns information whether it was applied or not. If it was not applied, it returns details of the existing values.
+        /// </para>
+        /// </summary>
+        Task<AppliedInfo<T>> InsertIfNotExistsAsync<T>(T poco, CqlQueryOptions queryOptions = null);
+
+        /// <summary>
+        /// Inserts the specified POCO in Cassandra, if not exists.
+        /// <para>
+        /// Returns information whether it was applied or not. If it was not applied, it returns details of the existing values.
+        /// </para>
+        /// </summary>
+        AppliedInfo<T> InsertIfNotExists<T>(T poco, CqlQueryOptions queryOptions = null);
+
+        /// <summary>
+        /// Updates the table for the poco type specified (T) using the CQL statement specified, using lightweight transactions.
+        /// Prepends "UPDATE tablename" to the CQL statement you specify, getting the table name appropriately from the POCO Type T.
+        /// <para>
+        /// Returns information whether it was applied or not. If it was not applied, it returns details of the existing values.
+        /// </para>
+        /// </summary>
+        AppliedInfo<T> UpdateIf<T>(Cql cql);
+
+        /// <summary>
+        /// Updates the table for the poco type specified (T) using the CQL statement specified, using lightweight transactions.
+        /// Prepends "UPDATE tablename" to the CQL statement you specify, getting the table name appropriately from the POCO Type T.
+        /// <para>
+        /// Returns information whether it was applied or not. If it was not applied, it returns details of the existing values.
+        /// </para>
+        /// </summary>
+        AppliedInfo<T> UpdateIf<T>(string cql, params object[] args);
+
+        /// <summary>
+        /// Updates the table for the poco type specified (T) using the CQL statement specified, using lightweight transactions.
+        /// Prepends "UPDATE tablename" to the CQL statement you specify, getting the table name appropriately from the POCO Type T.
+        /// <para>
+        /// Returns information whether it was applied or not. If it was not applied, it returns details of the existing values.
+        /// </para>
+        /// </summary>
+        Task<AppliedInfo<T>> UpdateIfAsync<T>(Cql cql);
+
+        /// <summary>
+        /// Updates the table for the poco type specified (T) using the CQL statement specified, using lightweight transactions.
+        /// Prepends "UPDATE tablename" to the CQL statement you specify, getting the table name appropriately from the POCO Type T.
+        /// <para>
+        /// Returns information whether it was applied or not. If it was not applied, it returns details of the existing values.
+        /// </para>
+        /// </summary>
+        Task<AppliedInfo<T>> UpdateIfAsync<T>(string cql, params object[] args);
+
+        /// <summary>
+        /// Executes a batch that contains a Lightweight transaction. 
+        /// </summary>
+        /// <para>
+        /// Returns information whether it was applied or not. If it was not applied, it returns details of the existing values.
+        /// </para>
+        Task<AppliedInfo<T>> ExecuteConditionalAsync<T>(ICqlBatch batch);
+
+        /// <summary>
+        /// Executes a batch that contains a Lightweight transaction. 
+        /// </summary>
+        /// <para>
+        /// Returns information whether it was applied or not. If it was not applied, it returns details of the existing values.
+        /// </para>
+        AppliedInfo<T> ExecuteConditional<T>(ICqlBatch batch);
     }
 }

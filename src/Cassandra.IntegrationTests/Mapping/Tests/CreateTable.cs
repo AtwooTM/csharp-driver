@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using Cassandra.Data.Linq;
-using Cassandra.IntegrationTests.Linq.Tests;
+using Cassandra.IntegrationTests.Linq.LinqMethods;
 using Cassandra.IntegrationTests.Mapping.Structures;
 using Cassandra.IntegrationTests.TestBase;
 using Cassandra.Mapping;
@@ -12,25 +12,18 @@ using NUnit.Framework;
 namespace Cassandra.IntegrationTests.Mapping.Tests
 {
     [Category("short")]
-    public class CreateTable : TestGlobals
+    public class CreateTable : SharedClusterTest
     {
         ISession _session = null;
-        private readonly Logger _logger = new Logger(typeof(CreateTable));
         string _uniqueKsName;
 
-        [SetUp]
-        public void SetupTest()
+        protected override void TestFixtureSetUp()
         {
-            _session = TestClusterManager.GetTestCluster(1).Session;
+            base.TestFixtureSetUp();
+            _session = Session;
             _uniqueKsName = TestUtils.GetUniqueKeyspaceName();
             _session.CreateKeyspace(_uniqueKsName);
             _session.ChangeKeyspace(_uniqueKsName);
-        }
-
-        [TearDown]
-        public void TeardownTest()
-        {
-            _session.DeleteKeyspace(_uniqueKsName);
         }
 
         /// <summary>
@@ -76,6 +69,7 @@ namespace Cassandra.IntegrationTests.Mapping.Tests
         {
             var config = new MappingConfiguration().Define(new Map<ManyDataTypesPoco>()
                 .PartitionKey(u => u.StringType)
+                .TableName("tbl_case_sens_once")
                 .CaseSensitive());
 
             var table = new Table<ManyDataTypesPoco>(_session, config);

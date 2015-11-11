@@ -21,6 +21,7 @@ namespace Cassandra
 {
     public class QueryProtocolOptions
     {
+        //This class was leaked to the API, making it internal would be a breaking change
         [Flags]
         public enum QueryFlags
         {
@@ -75,16 +76,21 @@ namespace Cassandra
             SerialConsistency = serialConsistency;
         }
 
-        internal static QueryProtocolOptions CreateFromQuery(Statement query, ConsistencyLevel defaultConsistencyLevel)
+        internal static QueryProtocolOptions CreateFromQuery(Statement query, QueryOptions queryOptions)
         {
             if (query == null)
             {
                 return Default;
             }
+            var consistency = query.ConsistencyLevel ?? queryOptions.GetConsistencyLevel();
+            var pageSize = query.PageSize != 0 ? query.PageSize : queryOptions.GetPageSize();
             var options = new QueryProtocolOptions(
-                query.ConsistencyLevel.HasValue ? query.ConsistencyLevel.Value : defaultConsistencyLevel,
+                consistency,
                 query.QueryValues,
-                query.SkipMetadata, query.PageSize, query.PagingState, query.SerialConsistencyLevel)
+                query.SkipMetadata, 
+                pageSize, 
+                query.PagingState, 
+                query.SerialConsistencyLevel)
             {
                 Timestamp = query.Timestamp
             };
@@ -126,7 +132,7 @@ namespace Cassandra
         }
 
         //TODO: Move to ExecuteRequest and QueryRequest
-        internal void Write(BEBinaryWriter wb, byte protocolVersion, bool isPrepared)
+        internal void Write(FrameWriter wb, byte protocolVersion, bool isPrepared)
         {
             //protocol v1: <query><n><value_1>....<value_n><consistency>
             //protocol v2: <query><consistency><flags>[<n><value_1>...<value_n>][<result_page_size>][<paging_state>][<serial_consistency>]

@@ -19,12 +19,13 @@ using System.Collections.Generic;
 using Cassandra.Data.Linq;
 using Cassandra.IntegrationTests.TestBase;
 using NUnit.Framework;
+#pragma warning disable 618
 
 namespace Cassandra.IntegrationTests.Linq.Structures
 {
     [AllowFiltering]
     [Table("allDataTypes")]
-    public class AllDataTypesEntityUtil
+    public class AllDataTypesEntityBase
     {
         public const int DefaultListLength = 5;
 
@@ -85,7 +86,7 @@ namespace Cassandra.IntegrationTests.Linq.Structures
                     AssertEquals(expectedEntity, actualEntity);
                     return true;
                 }
-                catch (AssertionException e) { }
+                catch (AssertionException) { }
             }
             return false;
         }
@@ -99,7 +100,7 @@ namespace Cassandra.IntegrationTests.Linq.Structures
                     AssertEquals(expectedEntity, actualEntity);
                     return true;
                 }
-                catch (AssertionException e) { }
+                catch (AssertionException) { }
             }
             return false;
         }

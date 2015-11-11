@@ -31,8 +31,18 @@ namespace Cassandra.Mapping
 
         public void Insert<T>(T poco, CqlQueryOptions queryOptions = null)
         {
+            Insert(false, poco, queryOptions);
+        }
+
+        public void InsertIfNotExists<T>(T poco, CqlQueryOptions queryOptions = null)
+        {
+            Insert(true, poco, queryOptions);
+        }
+
+        private void Insert<T>(bool ifNotExists, T poco, CqlQueryOptions queryOptions = null)
+        {
             // Get statement and bind values from POCO
-            string cql = _cqlGenerator.GenerateInsert<T>();
+            string cql = _cqlGenerator.GenerateInsert<T>(ifNotExists);
             Func<T, object[]> getBindValues = _mapperFactory.GetValueCollector<T>(cql);
             object[] values = getBindValues(poco);
 
@@ -43,7 +53,7 @@ namespace Cassandra.Mapping
         {
             // Get statement and bind values from POCO
             string cql = _cqlGenerator.GenerateUpdate<T>();
-            Func<T, object[]> getBindValues = _mapperFactory.GetValueCollector<T>(cql);
+            Func<T, object[]> getBindValues = _mapperFactory.GetValueCollector<T>(cql, primaryKeyValuesLast: true);
             object[] values = getBindValues(poco);
 
             _statements.Add(Cql.New(cql, values, queryOptions ?? CqlQueryOptions.None));

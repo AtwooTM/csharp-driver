@@ -25,11 +25,17 @@ namespace Cassandra
         ///  The default port for Cassandra __native__ binary protocol: 9042.
         /// </summary>
         public const int DefaultPort = 9042;
+        /// <summary>
+        /// Maximum length of a frame according to the protocol
+        /// </summary>
+        internal const int MaximumFrameLength = 256*1024*1024;
 
         private readonly int _port;
         private readonly SSLOptions _sslOptions;
         private CompressionType _compression = CompressionType.NoCompression;
         private IFrameCompressor _compressor;
+        private int _maxSchemaAgreementWaitSeconds = 10;
+        private byte? _maxProtocolVersion;
 
         /// <summary>
         ///  The port used to connect to the Cassandra hosts.
@@ -67,6 +73,24 @@ namespace Cassandra
         public IFrameCompressor CustomCompressor
         {
             get { return _compressor; }
+        }
+
+        /// <summary>
+        /// Gets the maximum time to wait for schema agreement before returning from a DDL query.
+        /// </summary>
+        public int MaxSchemaAgreementWaitSeconds 
+        {
+            get { return _maxSchemaAgreementWaitSeconds; }
+        }
+
+        /// <summary>
+        /// Gets the maximum protocol version to be used.
+        /// When set, it limits the maximum protocol version used to connect to the nodes.
+        /// Useful for using the driver against a cluster that contains nodes with different major/minor versions of Cassandra.
+        /// </summary>
+        public byte? MaxProtocolVersion
+        {
+            get { return _maxProtocolVersion; }
         }
 
         /// <summary>
@@ -121,6 +145,26 @@ namespace Cassandra
         public ProtocolOptions SetCustomCompressor(IFrameCompressor compressor)
         {
             _compressor = compressor;
+            return this;
+        }
+
+        /// <summary>
+        /// Sets the maximum time to wait for schema agreement before returning from a DDL query.
+        /// </summary>
+        public ProtocolOptions SetMaxSchemaAgreementWaitSeconds(int value)
+        {
+            _maxSchemaAgreementWaitSeconds = value;
+            return this;
+        }
+
+        /// <summary>
+        /// Sets the maximum protocol version to be used.
+        /// When set, it limits the maximum protocol version used to connect to the nodes.
+        /// Useful for using the driver against a cluster that contains nodes with different major/minor versions of Cassandra.
+        /// </summary>
+        public ProtocolOptions SetMaxProtocolVersion(byte value)
+        {
+            _maxProtocolVersion = value;
             return this;
         }
     }

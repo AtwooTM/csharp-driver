@@ -15,6 +15,8 @@
 //
 
 ﻿using System;
+﻿using System.Collections.Generic;
+
 namespace Cassandra
 {
     /// <summary>
@@ -25,6 +27,10 @@ namespace Cassandra
     /// </summary>
     public interface IStatement
     {
+        /// <summary>
+        /// Determines if the <see cref="RowSet"/> returned when executing this <c>IStatement</c> will automatically fetch the following result pages. Defaults to true.
+        /// </summary>
+        bool AutoPage { get; }
         /// <summary>
         /// Gets the consistency level for this query.
         /// </summary>
@@ -67,7 +73,36 @@ namespace Cassandra
         ///  safely ignored.</p>
         /// </summary>
         RoutingKey RoutingKey { get; }
+        /// <summary>
+        /// Gets the serial consistency level for the query.
+        /// <para>
+        /// The serial consistency level is only used by conditional updates (INSERT, UPDATE
+        /// and DELETE with an IF condition).
+        /// </para>
+        /// </summary>
         ConsistencyLevel SerialConsistencyLevel { get; }
+        bool SkipMetadata { get; }
+        /// <summary>
+        /// Gets custom payload for that will be included when executing this Statement.
+        /// </summary>
+        IDictionary<string, byte[]> OutgoingPayload { get; }
+        /// <summary>
+        /// Determines if this statement is idempotent, i.e. whether it can be applied multiple times without 
+        /// changing the result beyond the initial application.
+        /// <para>
+        /// Idempotence of the statement plays a role in <see cref="ISpeculativeExecutionPolicy"/>.
+        /// If a statement is <em>not idempotent</em>, the driver will not schedule speculative executions for it.
+        /// </para>
+        /// When the property is null, the driver will use the default value from the <see cref="QueryOptions.GetDefaultIdempotence()"/>.
+        /// </summary>
+        bool? IsIdempotent { get; }
+        /// <summary>
+        /// Sets the paging behavior.
+        /// When set to true (default), the <see cref="RowSet"/> returned when executing this <c>IStatement</c> will automatically fetch the following result pages.
+        /// When false, the <see cref="RowSet"/> returned will only contain the rows contained in the result page and will not fetch additional pages.
+        /// </summary>
+        /// <returns>this <c>IStatement</c> object.</returns>
+        IStatement SetAutoPage(bool autoPage);
         /// <summary>
         ///  Sets the consistency level for the query. <p> The default consistency level,
         ///  if this method is not called, is ConsistencyLevel.ONE.</p>
@@ -93,6 +128,12 @@ namespace Cassandra
         /// <returns>this <c>Query</c> object.</returns>
         /// </summary>
         IStatement SetPageSize(int pageSize);
+        /// <summary>
+        /// Sets the paging state, a token representing the current page state of query used to continue paging by retrieving the following result page.
+        /// Setting the paging state will disable automatic paging.
+        /// </summary>
+        /// <param name="pagingState">The page state token</param>
+        /// <returns>this <c>IStatement</c> object.</returns>
         IStatement SetPagingState(byte[] pagingState);
         /// <summary>
         ///  Sets the retry policy to use for this query. <p> The default retry policy, if
@@ -106,7 +147,7 @@ namespace Cassandra
         IStatement SetRetryPolicy(IRetryPolicy policy);
         /// <summary>
         /// Sets the serial consistency level for the query.
-        ///    The serial consistency level is only used by conditional updates (so INSERT, UPDATE
+        /// The serial consistency level is only used by conditional updates (so INSERT, UPDATE
         /// and DELETE with an IF condition). For those, the serial consistency level defines
         /// the consistency level of the serial phase (or "paxos" phase) while the
         /// normal consistency level defines the consistency for the "learn" phase, i.e. what
@@ -127,6 +168,19 @@ namespace Cassandra
         /// timestamp as default timestamp. Note that a timestamp in the query itself will still override this timestamp.
         /// </summary>
         IStatement SetTimestamp(DateTimeOffset value);
-        bool SkipMetadata { get; }
+        /// <summary>
+        /// Sets a custom outgoing payload for this statement.
+        /// Each time this statement is executed, this payload will be included in the request.
+        /// Once it is set using this method, the payload should not be modified.
+        /// </summary>
+        IStatement SetOutgoingPayload(IDictionary<string, byte[]> payload);
+        /// <summary>
+        /// Sets whether this statement is idempotent.
+        /// <para>
+        /// Idempotence of the statement plays a role in <see cref="ISpeculativeExecutionPolicy"/>.
+        /// If a statement is <em>not idempotent</em>, the driver will not schedule speculative executions for it.
+        /// </para>
+        /// </summary>
+        IStatement SetIdempotence(bool value);
     }
 }

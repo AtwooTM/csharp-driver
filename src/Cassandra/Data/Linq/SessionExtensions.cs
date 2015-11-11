@@ -22,7 +22,7 @@ namespace Cassandra.Data.Linq
     public static class SessionExtensions
     {
         /// <summary>
-        /// <para>Extension method used for backward-compatibility, use <see cref="Table&lt;T&gt;(Cassandra.ISession)"/> constructor instead.</para>
+        /// <para>Extension method used for backward-compatibility, use <see cref="Cassandra.Data.Linq.Table{T}(Cassandra.ISession)"/> constructor instead.</para>
         /// <para>Creates a new instance of the Linq IQueryProvider that represents a table in Cassandra using the mapping configuration provided.</para>
         /// <para>Fluent configuration or attributes can be used to define mapping information.</para>
         /// </summary>
@@ -37,8 +37,11 @@ namespace Cassandra.Data.Linq
         public static Table<TEntity> GetTable<TEntity>(this ISession session, string tableName = null, string keyspaceName = null)
         {
             //Use Linq defaults if no definition has been set for this types
+            //Linq attributes are marked as Obsolete
+            #pragma warning disable 612
             MappingConfiguration.Global.MapperFactory.PocoDataFactory.AddDefinitionDefault(typeof(TEntity),
                 () => new LinqAttributeBasedTypeDefinition(typeof (TEntity), tableName, keyspaceName));
+            #pragma warning restore 612
             var config = MappingConfiguration.Global;
             return new Table<TEntity>(session, config, tableName, keyspaceName);
         }

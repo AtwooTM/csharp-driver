@@ -27,7 +27,7 @@ namespace Cassandra.Mapping.TypeConversion
 
         private static readonly MethodInfo ConvertToSortedSetMethod = typeof(TypeConverter).GetMethod("ConvertToSortedSet", PrivateStatic);
 
-        private static readonly MethodInfo ConvertToArrayMethod = typeof(Enumerable).GetMethod("ToArray", BindingFlags.Public | BindingFlags.Static);
+        private static readonly MethodInfo ConvertToListMethod = typeof(TypeConverter).GetMethod("ConvertToList", PrivateStatic);
 
         private readonly ConcurrentDictionary<Tuple<Type, Type>, Delegate> _fromDbConverterCache;
         private readonly ConcurrentDictionary<Tuple<Type, Type>, Delegate> _toDbConverterCache; 
@@ -113,13 +113,21 @@ namespace Cassandra.Mapping.TypeConversion
                     return enumMapper;
                 }
             }
-            if (dbType == typeof(DateTimeOffset) && pocoType == typeof(DateTime))
+            if (dbType == typeof(DateTimeOffset))
             {
-                Func<DateTimeOffset, DateTime> dateMapper = d => d.DateTime;
-                return dateMapper;
+                if (pocoType == typeof(DateTime))
+                {
+                    Func<DateTimeOffset, DateTime> dateMapper = d => d.DateTime;
+                    return dateMapper;
+                }
+                if (pocoType == typeof(DateTime?))
+                {
+                    Func<DateTimeOffset, DateTime?> dateMapper = d => d.DateTime;
+                    return dateMapper;
+                }
             }
 
-            if (dbType.IsGenericType && pocoType.IsGenericType)
+            if (dbType.IsGenericType && (pocoType.IsGenericType || pocoType.IsArray))
             {
                 Type sourceGenericDefinition = dbType.GetGenericTypeDefinition();
                 Type[] sourceGenericArgs = dbType.GetGenericArguments();
@@ -145,10 +153,10 @@ namespace Cassandra.Mapping.TypeConversion
                         return ConvertToSortedSetMethod.MakeGenericMethod(sourceGenericArgs).CreateDelegate();
                     }
 
-                    // Allow converting from set/list's IEnumerable<T> to T[]
-                    if (pocoType == sourceGenericArgs[0].MakeArrayType())
+                    if (pocoType == typeof(List<>).MakeGenericType(sourceGenericArgs) ||
+                        pocoType == typeof(IList<>).MakeGenericType(sourceGenericArgs))
                     {
-                        return ConvertToArrayMethod.MakeGenericMethod(sourceGenericArgs).CreateDelegate();
+                        return ConvertToListMethod.MakeGenericMethod(sourceGenericArgs).CreateDelegate();
                     }
                 }
             }
@@ -165,7 +173,9 @@ namespace Cassandra.Mapping.TypeConversion
             // Allow for user-defined conversions
             Delegate converter = GetUserDefinedToDbConverter<TPoco, TDatabase>();
             if (converter != null)
+            {
                 return converter;
+            }
 
             Type pocoType = typeof (TPoco);
             Type dbType = typeof (TDatabase);
@@ -206,6 +216,11 @@ namespace Cassandra.Mapping.TypeConversion
         private static SortedSet<T> ConvertToSortedSet<T>(IEnumerable<T> setFromDatabase)
         {
             return new SortedSet<T>(setFromDatabase);
+        }
+
+        private static List<T> ConvertToList<T>(IEnumerable<T> itemsDatabase)
+        {
+            return new List<T>(itemsDatabase);
         }
         // ReSharper restore UnusedMember.Local
         

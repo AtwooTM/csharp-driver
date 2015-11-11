@@ -15,6 +15,8 @@
 //
 
 using System;
+using System.Collections.Generic;
+using Cassandra.Requests;
 
 namespace Cassandra
 {
@@ -23,30 +25,19 @@ namespace Cassandra
     /// </summary>
     public abstract class Statement : IStatement
     {
-        private ConsistencyLevel? _consistency;
-        private int _pageSize;
-        private byte[] _pagingState;
-        private IRetryPolicy _retryPolicy;
-        private ConsistencyLevel _serialConsistency;
-        private bool _skipMetadata;
-        private bool _traceQuery;
+        private ConsistencyLevel _serialConsistency = QueryProtocolOptions.Default.SerialConsistency;
         private object[] _values;
-        private DateTimeOffset? _timestamp;
+        private bool _autoPage = true;
 
         public virtual object[] QueryValues
         {
             get { return _values; }
         }
         /// <inheritdoc />
-        public bool SkipMetadata
-        {
-            get { return _skipMetadata; }
-        }
+        public bool SkipMetadata { get; private set; }
+
         /// <inheritdoc />
-        public ConsistencyLevel? ConsistencyLevel
-        {
-            get { return _consistency; }
-        }
+        public ConsistencyLevel? ConsistencyLevel { get; private set; }
 
         /// <summary>
         /// Gets the serial consistency level for this query.
@@ -57,58 +48,55 @@ namespace Cassandra
         }
 
         /// <inheritdoc />
-        public int PageSize
+        public int PageSize { get; private set; }
+
+        /// <inheritdoc />
+        public bool IsTracing { get; private set; }
+
+        /// <inheritdoc />
+        public IRetryPolicy RetryPolicy { get; private set; }
+
+        /// <inheritdoc />
+        public byte[] PagingState { get; private set; }
+
+        /// <inheritdoc />
+        public DateTimeOffset? Timestamp { get; private set; }
+
+        /// <inheritdoc />
+        public bool AutoPage
         {
-            get { return _pageSize; }
+            get { return _autoPage; }
         }
 
         /// <inheritdoc />
-        public bool IsTracing
-        {
-            get { return _traceQuery; }
-        }
-
-        /// <inheritdoc />
-        public IRetryPolicy RetryPolicy
-        {
-            get { return _retryPolicy; }
-        }
-        /// <inheritdoc />
-        public byte[] PagingState
-        {
-            get { return _pagingState; }
-        }
-
-        /// <inheritdoc />
-        public DateTimeOffset? Timestamp
-        {
-            get { return _timestamp; }
-        }
+        public IDictionary<string, byte[]> OutgoingPayload { get; private set; }
 
         /// <inheritdoc />
         public abstract RoutingKey RoutingKey { get; }
 
+        /// <summary>
+        /// Gets or sets the protocol version used for Routing Key parts encoding
+        /// </summary>
+        internal int ProtocolVersion { get; set; }
 
-        // We don't want to expose the constructor, because the code rely on this being only subclassed by Statement and BoundStatement
+        /// <inheritdoc />
+        public bool? IsIdempotent { get; private set; }
+
         protected Statement()
         {
-            //this._consistency = QueryOptions.DefaultConsistencyLevel;
+            ProtocolVersion = 1;
         }
-        
+
         /// <inheritdoc />
         protected Statement(QueryProtocolOptions queryProtocolOptions)
         {
-            _pagingState = queryProtocolOptions.PagingState;
-            _values = queryProtocolOptions.Values;
-            _consistency = queryProtocolOptions.Consistency;
-            _pageSize = queryProtocolOptions.PageSize;
-            _serialConsistency = queryProtocolOptions.SerialConsistency;
+            //the unused parameter is maintained for backward compatibility
         }
-        
+
         /// <inheritdoc />
         internal Statement SetSkipMetadata(bool val)
         {
-            _skipMetadata = val;
+            SkipMetadata = val;
             return this;
         }
 
@@ -129,21 +117,33 @@ namespace Cassandra
         {
             _values = values;
         }
-        
+
+        /// <inheritdoc />
+        public IStatement SetAutoPage(bool autoPage)
+        {
+            _autoPage = autoPage;
+            return this;
+        }
+
         /// <inheritdoc />
         public IStatement SetPagingState(byte[] pagingState)
         {
-            _pagingState = pagingState;
+            PagingState = pagingState;
+            //Disable automatic paging only if paging state is set to something other then null
+            if (pagingState != null && pagingState.Length > 0)
+            {
+                return SetAutoPage(false);
+            }
             return this;
         }
-        
+
         /// <inheritdoc />
         public IStatement SetConsistencyLevel(ConsistencyLevel? consistency)
         {
-            _consistency = consistency;
+            ConsistencyLevel = consistency;
             return this;
         }
-        
+
         /// <inheritdoc />
         public IStatement SetSerialConsistencyLevel(ConsistencyLevel serialConsistency)
         {
@@ -158,28 +158,28 @@ namespace Cassandra
         /// <inheritdoc />
         public IStatement SetTimestamp(DateTimeOffset value)
         {
-            _timestamp = value;
+            Timestamp = value;
             return this;
         }
 
         /// <inheritdoc />
         public IStatement EnableTracing(bool enable = true)
         {
-            _traceQuery = enable;
+            IsTracing = enable;
             return this;
         }
-        
+
         /// <inheritdoc />
         public IStatement DisableTracing()
         {
-            _traceQuery = false;
+            IsTracing = false;
             return this;
         }
 
         /// <inheritdoc />
         public IStatement SetRetryPolicy(IRetryPolicy policy)
         {
-            _retryPolicy = policy;
+            RetryPolicy = policy;
             return this;
         }
 
@@ -187,11 +187,25 @@ namespace Cassandra
         {
             throw new InvalidOperationException("Cannot insert this query into the batch");
         }
+        
+        /// <inheritdoc />
+        public IStatement SetIdempotence(bool value)
+        {
+            IsIdempotent = value;
+            return this;
+        }
 
         /// <inheritdoc />
         public IStatement SetPageSize(int pageSize)
         {
-            _pageSize = pageSize;
+            PageSize = pageSize;
+            return this;
+        }
+
+        /// <inheritdoc />
+        public IStatement SetOutgoingPayload(IDictionary<string, byte[]> payload)
+        {
+            OutgoingPayload = payload;
             return this;
         }
     }

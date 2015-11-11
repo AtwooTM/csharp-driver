@@ -23,6 +23,7 @@ using Cassandra.IntegrationTests.Mapping.Tests;
 using Cassandra.IntegrationTests.TestBase;
 using Cassandra.Mapping;
 using NUnit.Framework;
+#pragma warning disable 618
 
 namespace Cassandra.IntegrationTests.Mapping.Structures
 {
@@ -134,7 +135,7 @@ namespace Cassandra.IntegrationTests.Mapping.Structures
                     expectedEntity.AssertEquals(actualEntity);
                     return true;
                 }
-                catch (AssertionException e) { }
+                catch (AssertionException) { }
             }
             return false;
         }

@@ -20,6 +20,8 @@ using System.Net;
 using System.Threading;
 using System.Collections.Concurrent;
 using System.Threading.Tasks;
+ using Cassandra.Tasks;
+using Cassandra.Requests;
 
 namespace Cassandra
 {
@@ -29,13 +31,14 @@ namespace Cassandra
     /// <inheritdoc cref="Cassandra.ISession" />
     public class Session : ISession
     {
-        private static Logger _logger = new Logger(typeof(Session));
-        
+        private static readonly Logger Logger = new Logger(typeof(Session));
         private readonly ConcurrentDictionary<IPEndPoint, HostConnectionPool> _connectionPool;
         private int _disposed;
+        private volatile string _keyspace;
 
         public int BinaryProtocolVersion { get; internal set; }
 
+        /// <inheritdoc />
         public ICluster Cluster { get; private set; }
 
         /// <summary>
@@ -43,12 +46,23 @@ namespace Cassandra
         /// </summary>
         public Configuration Configuration { get; protected set; }
 
+        /// <summary>
+        /// Determines if the session is already disposed
+        /// </summary>
         public bool IsDisposed
         {
             get { return Thread.VolatileRead(ref _disposed) > 0; }
         }
 
-        public string Keyspace { get; internal set; }
+        /// <summary>
+        /// Gets or sets the keyspace
+        /// </summary>
+        public string Keyspace
+        {
+            get { return _keyspace; }
+            internal set { _keyspace = value; }
+        }
+
         /// <inheritdoc />
         public UdtMappingDefinitions UserDefinedTypes { get; private set; }
 
@@ -85,10 +99,10 @@ namespace Cassandra
         /// <inheritdoc />
         public void ChangeKeyspace(string keyspace)
         {
-            if (this.Keyspace != keyspace)
+            if (Keyspace != keyspace)
             {
-                this.Execute(new SimpleStatement(CqlQueryTools.GetUseKeyspaceCql(keyspace)));
-                this.Keyspace = keyspace;
+                Execute(new SimpleStatement(CqlQueryTools.GetUseKeyspaceCql(keyspace)));
+                Keyspace = keyspace;
             }
         }
 
@@ -96,7 +110,7 @@ namespace Cassandra
         public void CreateKeyspace(string keyspace, Dictionary<string, string> replication = null, bool durableWrites = true)
         {
             WaitForSchemaAgreement(Execute(CqlQueryTools.GetCreateKeyspaceCql(keyspace, replication, durableWrites, false)));
-            _logger.Info("Keyspace [" + keyspace + "] has been successfully CREATED.");
+            Logger.Info("Keyspace [" + keyspace + "] has been successfully CREATED.");
         }
 
         /// <inheritdoc />
@@ -108,7 +122,7 @@ namespace Cassandra
             }
             catch (AlreadyExistsException)
             {
-                _logger.Info(string.Format("Cannot CREATE keyspace:  {0}  because it already exists.", keyspaceName));
+                Logger.Info(string.Format("Cannot CREATE keyspace:  {0}  because it already exists.", keyspaceName));
             }
         }
 
@@ -127,7 +141,7 @@ namespace Cassandra
             }
             catch (InvalidQueryException)
             {
-                _logger.Info(string.Format("Cannot DELETE keyspace:  {0}  because it not exists.", keyspaceName));
+                Logger.Info(string.Format("Cannot DELETE keyspace:  {0}  because it not exists.", keyspaceName));
             }
         }
 
@@ -153,18 +167,11 @@ namespace Cassandra
         /// <summary>
         /// Initialize the session
         /// </summary>
-        /// <param name="createConnection">Determine if a connection must be created to test the host</param>
-        internal void Init(bool createConnection)
+        internal void Init()
         {
-            Policies.LoadBalancingPolicy.Initialize(Cluster);
-
-            if (!createConnection)
-            {
-                return;
-            }
-            var handler = new RequestHandler<RowSet>(this, null, null);
-            //Borrow a connection
-            handler.GetNextConnection(null);
+            var handler = new RequestHandler<RowSet>(this);
+            //Borrow a connection, trying to fail fast
+            TaskHelper.WaitToComplete(handler.GetNextConnection(new Dictionary<IPEndPoint,Exception>()));
         }
 
         /// <inheritdoc />
@@ -212,7 +219,7 @@ namespace Cassandra
         /// <inheritdoc />
         public Task<RowSet> ExecuteAsync(IStatement statement)
         {
-            return new RequestHandler<RowSet>(this, GetRequest(statement), statement).Send();
+            return new RequestHandler<RowSet>(this, statement).Send();
         }
 
         /// <summary>
@@ -234,9 +241,9 @@ namespace Cassandra
         }
 
         /// <summary>
-        /// Gets the connection pool for a given host
+        /// Gets or creates the connection pool for a given host
         /// </summary>
-        internal HostConnectionPool GetConnectionPool(Host host, HostDistance distance)
+        internal HostConnectionPool GetOrCreateConnectionPool(Host host, HostDistance distance)
         {
             var hostPool = _connectionPool.GetOrAdd(host.Address, address => new HostConnectionPool(host, distance, Configuration));
             //It can change from the last time, when trying lower protocol versions
@@ -245,64 +252,96 @@ namespace Cassandra
         }
 
         /// <summary>
-        /// Gets the Request to send to a cassandra node based on the statement type
+        /// Gets the existing connection pool for this host and session or null when it does not exists
         /// </summary>
-        internal IRequest GetRequest(IStatement statement)
+        internal HostConnectionPool GetExistingPool(Connection connection)
         {
-            var defaultConsistency = Configuration.QueryOptions.GetConsistencyLevel();
-            if (statement is RegularStatement)
-            {
-                var s = (RegularStatement)statement;
-                var options = QueryProtocolOptions.CreateFromQuery(s, defaultConsistency);
-                options.ValueNames = s.QueryValueNames;
-                return new QueryRequest(BinaryProtocolVersion, s.QueryString, s.IsTracing, options);
-            }
-            if (statement is BoundStatement)
-            {
-                var s = (BoundStatement)statement;
-                var options = QueryProtocolOptions.CreateFromQuery(s, defaultConsistency);
-                return new ExecuteRequest(BinaryProtocolVersion, s.PreparedStatement.Id, null, s.IsTracing, options);
-            }
-            if (statement is BatchStatement)
-            {
-                var s = (BatchStatement)statement;
-                var consistency = defaultConsistency;
-                if (s.ConsistencyLevel != null)
-                {
-                    consistency = s.ConsistencyLevel.Value;
-                }
-                return new BatchRequest(BinaryProtocolVersion, s, consistency);
-            }
-            throw new NotSupportedException("Statement of type " + statement.GetType().FullName + " not supported");
+            HostConnectionPool pool;
+            _connectionPool.TryGetValue(connection.Address, out pool);
+            return pool;
         }
 
         public PreparedStatement Prepare(string cqlQuery)
         {
-            var task = PrepareAsync(cqlQuery);
+            return Prepare(cqlQuery, null);
+        }
+
+        public PreparedStatement Prepare(string cqlQuery, IDictionary<string, byte[]> customPayload)
+        {
+            var task = PrepareAsync(cqlQuery, customPayload);
             TaskHelper.WaitToComplete(task, Configuration.ClientOptions.QueryAbortTimeout);
             return task.Result;
         }
 
+        /// <inheritdoc />
         public Task<PreparedStatement> PrepareAsync(string query)
         {
-            var request = new PrepareRequest(this.BinaryProtocolVersion, query);
-            return new RequestHandler<PreparedStatement>(this, request, null).Send();
+            return PrepareAsync(query, null);
+        }
+
+        public Task<PreparedStatement> PrepareAsync(string query, IDictionary<string, byte[]> customPayload)
+        {
+            var request = new PrepareRequest(BinaryProtocolVersion, query)
+            {
+                Payload = customPayload
+            };
+            return new RequestHandler<PreparedStatement>(this, request)
+                .Send()
+                .Continue(SetPrepareTableInfo);
+        }
+
+        /// <inheritdoc />
+        private PreparedStatement SetPrepareTableInfo(Task<PreparedStatement> t)
+        {
+            const string msgRoutingNotSet = "Routing information could not be set for query \"{0}\"";
+            var ps = t.Result;
+            var column = ps.Metadata.Columns.FirstOrDefault();
+            if (column == null || column.Keyspace == null)
+            {
+                //The prepared statement does not contain parameters
+                return ps;
+            }
+            if (ps.Metadata.PartitionKeys != null)
+            {
+                //The routing indexes where parsed in the prepared response
+                if (ps.Metadata.PartitionKeys.Length == 0)
+                {
+                    //zero-length partition keys means that none of the parameters are partition keys
+                    //the partition key is hard-coded.
+                    return ps;
+                }
+                ps.RoutingIndexes = ps.Metadata.PartitionKeys;
+                return ps;
+            }
+            TableMetadata table = null;
+            try
+            {
+                table = Cluster.Metadata.GetTable(column.Keyspace, column.Table);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("There was an error while trying to retrieve table metadata for {0}.{1}. {2}", column.Keyspace, column.Table, ex.ToString());
+            }
+            if (table == null)
+            {
+                Logger.Info(msgRoutingNotSet, ps.Cql);
+                return ps;
+            }
+            var routingSet = ps.SetPartitionKeys(table.PartitionKeys);
+            if (!routingSet)
+            {
+                Logger.Info(msgRoutingNotSet, ps.Cql);
+            }
+            return ps;
         }
 
         public void WaitForSchemaAgreement(RowSet rs)
         {
-            WaitForSchemaAgreement(rs.Info.QueriedHost);
+            
         }
 
         public bool WaitForSchemaAgreement(IPEndPoint hostAddress)
         {
-            //TODO: Remove method
-            if (Cluster.Metadata.AllHosts().Count == 1)
-            {
-                return true;
-            }
-            //This is trivial, but there isn't a reliable way to wait for all nodes to have the same schema.
-            Thread.Sleep(1000 + (int)(300 * Math.Pow(2, Cluster.Metadata.AllHosts().Count)));
             return false;
         }
 
@@ -322,9 +361,11 @@ namespace Cassandra
             {
                 return true;
             }
-            _logger.Info("Waiting for pending operations of " + connections.Count + " connections to complete.");
+            Logger.Info("Waiting for pending operations of " + connections.Count + " connections to complete.");
             var handles = connections.Select(c => c.WaitPending()).ToArray();
-            return WaitHandle.WaitAll(handles, timeout);
+            //WaitHandle.WaitAll() not supported on STAThreads (thanks COM!)
+            //Start new task and wait on the individual Task
+            return Task.Factory.StartNew(() => WaitHandle.WaitAll(handles, timeout)).Wait(timeout);
         }
     }
 }

@@ -41,7 +41,7 @@ namespace Cassandra.IntegrationTests.Core
         [Test]
         public void KeyspacesMetadataAvailableAtStartup()
         {
-            ITestCluster testCluster = TestClusterManager.GetTestCluster(DefaultNodeCount);
+            ITestCluster testCluster = TestClusterManager.GetNonShareableTestCluster(DefaultNodeCount);
             var cluster = testCluster.Cluster;
 
             // Basic status check
@@ -65,7 +65,7 @@ namespace Cassandra.IntegrationTests.Core
         [Test]
         public void KeyspacesMetadataUpToDateViaCassandraEvents()
         {
-            ITestCluster testCluster = TestClusterManager.GetTestCluster(2);
+            ITestCluster testCluster = TestClusterManager.GetNonShareableTestCluster(2);
             var cluster = testCluster.Cluster;
             var session = testCluster.Session;
             var initialLength = cluster.Metadata.GetKeyspaces().Count;
@@ -102,7 +102,6 @@ namespace Cassandra.IntegrationTests.Core
         {
             ITestCluster testCluster = TestClusterManager.GetNonShareableTestCluster(2);
             var cluster = testCluster.Cluster;
-
             //The control connection is connected to host 1
             Assert.AreEqual(1, TestHelper.GetLastAddressByte(cluster.Metadata.ControlConnection.BindAddress));
             testCluster.StopForce(1);
@@ -122,6 +121,14 @@ namespace Cassandra.IntegrationTests.Core
         {
             ITestCluster testCluster = TestClusterManager.GetNonShareableTestCluster(2);
             var cluster = testCluster.Cluster;
+            var downEventFired = false;
+            cluster.Metadata.HostsEvent += (sender, e) =>
+            {
+                if (e.What == HostsEventArgs.Kind.Down)
+                {
+                    downEventFired = true;
+                }
+            };
 
             //The control connection is connected to host 1
             //All host are up
@@ -139,8 +146,53 @@ namespace Cassandra.IntegrationTests.Core
                 }
                 Thread.Sleep(1000);
             }
-            Assert.True(cluster.AllHosts().Any(h => TestHelper.GetLastAddressByte(h) == 2 && !h.IsUp));
+            Assert.True(cluster.AllHosts().Any(h => TestHelper  .GetLastAddressByte(h) == 2 && !h.IsUp));
             Assert.AreNotEqual(counter, maxWait, "Waited but it was never notified via events");
+            Assert.True(downEventFired);
+        }
+
+        /// <summary>
+        /// Starts a cluster with 2 nodes, kills one of them (the one used by the control connection or the other) and checks that the Host Down event was fired.
+        /// Then restarts the node and checks that the Host Up event fired.
+        /// </summary>
+        [TestCase(true, Description = "Using the control connection host")]
+        [TestCase(false, Description = "Using the other host")]
+        public void MetadataHostsEventTest(bool useControlConnectionHost)
+        {
+            var testCluster = TestClusterManager.GetNonShareableTestCluster(2);
+            var cluster = testCluster.Cluster;
+            var session = testCluster.Session;
+            var downEventFired = false;
+            var upEventFired = false;
+            cluster.Metadata.HostsEvent += (sender, e) =>
+            {
+                if (e.What == HostsEventArgs.Kind.Down)
+                {
+                    downEventFired = true;
+                }
+                else
+                {
+                    upEventFired = true;
+                }
+            };
+            //The host not used by the control connection
+            int hostToKill = TestHelper.GetLastAddressByte(cluster.Metadata.ControlConnection.BindAddress);
+            if (!useControlConnectionHost)
+            {
+                hostToKill = hostToKill == 1 ? 2 : 1;
+            }
+            testCluster.Stop(hostToKill);
+            Thread.Sleep(10000);
+            TestHelper.Invoke(() => session.Execute("SELECT key from system.local"), 10);
+            Assert.True(cluster.AllHosts().Any(h => TestHelper.GetLastAddressByte(h) == hostToKill && !h.IsUp));
+            Assert.True(downEventFired);
+            testCluster.Start(hostToKill);
+            Thread.Sleep(20000);
+            TestHelper.Invoke(() => session.Execute("SELECT key from system.local"), 10);
+            Assert.True(cluster.AllHosts().All(h => h.IsConsiderablyUp));
+            //When the host of the control connection is used
+            //It can result that event UP is not fired as it is not received by the control connection (it reconnected but missed the event) 
+            Assert.True(upEventFired || useControlConnectionHost);
         }
 
         private void CheckPureMetadata(Cluster cluster, ISession session, string tableName, string keyspaceName, TableOptions tableOptions = null)
@@ -222,7 +274,7 @@ namespace Cassandra.IntegrationTests.Core
 
         private void CheckMetadata(string tableName, string keyspaceName, TableOptions tableOptions = null)
         {
-            ITestCluster testCluster = TestClusterManager.GetTestCluster(DefaultNodeCount);
+            ITestCluster testCluster = TestClusterManager.GetNonShareableTestCluster(DefaultNodeCount);
             var cluster = testCluster.Cluster;
             var session = testCluster.Session;
 
@@ -235,7 +287,7 @@ namespace Cassandra.IntegrationTests.Core
         [Test]
         public void CheckSimpleStrategyKeyspace()
         {
-            ITestCluster testCluster = TestClusterManager.GetTestCluster(DefaultNodeCount);
+            ITestCluster testCluster = TestClusterManager.GetNonShareableTestCluster(DefaultNodeCount);
             var session = testCluster.Session;
             bool durableWrites = Randomm.Instance.NextBoolean();
             string keyspaceName = TestUtils.GetUniqueKeyspaceName();
@@ -256,7 +308,7 @@ namespace Cassandra.IntegrationTests.Core
         [Test]
         public void CheckNetworkTopologyStrategyKeyspace()
         {
-            ITestCluster testCluster = TestClusterManager.GetTestCluster(DefaultNodeCount);
+            ITestCluster testCluster = TestClusterManager.GetNonShareableTestCluster(DefaultNodeCount);
             var session = testCluster.Session;
             string keyspaceName = TestUtils.GetUniqueKeyspaceName();
             bool durableWrites = Randomm.Instance.NextBoolean();
@@ -308,7 +360,7 @@ namespace Cassandra.IntegrationTests.Core
         public void CheckKeyspaceMetadata()
         {
             string keyspaceName = TestUtils.GetUniqueKeyspaceName().ToLower();
-            ITestCluster testCluster = TestClusterManager.GetTestCluster(DefaultNodeCount);
+            ITestCluster testCluster = TestClusterManager.GetNonShareableTestCluster(DefaultNodeCount);
             var session = testCluster.Session;
 
             const string strategyClass = "SimpleStrategy";
@@ -318,8 +370,7 @@ namespace Cassandra.IntegrationTests.Core
                         CREATE KEYSPACE {0} 
                         WITH replication = {{ 'class' : '{1}', 'replication_factor' : {2} }}
                         AND durable_writes={3};", keyspaceName, strategyClass, 1, durableWrites);
-            var rowSet = session.Execute(cql);
-            session.WaitForSchemaAgreement(rowSet);
+            session.Execute(cql);
             session.ChangeKeyspace(keyspaceName);
 
             for (var i = 0; i < 10; i++)
@@ -336,7 +387,7 @@ namespace Cassandra.IntegrationTests.Core
         [Test, TestCassandraVersion(2,1)]
         public void UdtMetadataTest()
         {
-            ITestCluster testCluster = TestClusterManager.GetTestCluster(DefaultNodeCount);
+            ITestCluster testCluster = TestClusterManager.GetNonShareableTestCluster(DefaultNodeCount);
             var cluster = testCluster.Cluster;
             var session = testCluster.Session;
             string keyspaceName = TestUtils.GetUniqueKeyspaceName();
@@ -385,7 +436,7 @@ namespace Cassandra.IntegrationTests.Core
             string tableName = TestUtils.GetUniqueTableName().ToLower();
             string cqlTable1 = "CREATE TABLE " + tableName + " (id int PRIMARY KEY, phone frozen<tuple<uuid, text, int>>, achievements list<frozen<tuple<text,int>>>)";
 
-            ITestCluster testCluster = TestClusterManager.GetTestCluster(DefaultNodeCount);
+            ITestCluster testCluster = TestClusterManager.GetNonShareableTestCluster(DefaultNodeCount);
             var cluster = testCluster.Cluster;
             var session = testCluster.Session;
 
@@ -401,14 +452,14 @@ namespace Cassandra.IntegrationTests.Core
         public void TableMetadataCompositePartitionKeyTest()
         {
             string keyspaceName = TestUtils.GetUniqueKeyspaceName();
-            ITestCluster testCluster = TestClusterManager.GetTestCluster(DefaultNodeCount);
+            ITestCluster testCluster = TestClusterManager.GetNonShareableTestCluster(DefaultNodeCount);
             var cluster = testCluster.Cluster;
             var session = testCluster.Session;
 
             string tableName1 = TestUtils.GetUniqueTableName().ToLower();
             string cql = "CREATE TABLE " + tableName1 + " ( " +
-                    @"a text,
-                    b int,
+                    @"b int,
+                    a text,
                     c int,
                     d int,
                     PRIMARY KEY ((a, b), c))";
@@ -424,6 +475,8 @@ namespace Cassandra.IntegrationTests.Core
                                .GetKeyspace(keyspaceName)
                                .GetTableMetadata(tableName1);
             Assert.True(table.TableColumns.Count() == 4);
+            Assert.AreEqual(2, table.PartitionKeys.Length);
+            Assert.AreEqual("a, b", String.Join(", ", table.PartitionKeys.Select(p => p.Name)));
 
             string tableName2 = TestUtils.GetUniqueTableName().ToLower();
             cql = "CREATE TABLE " + tableName2 + " ( " +
@@ -432,12 +485,13 @@ namespace Cassandra.IntegrationTests.Core
                     c int,
                     d int,
                     PRIMARY KEY ((a, b, c)))";
-            session.WaitForSchemaAgreement(session.Execute(cql));
+            session.Execute(cql);
 
             table = cluster.Metadata
                            .GetKeyspace(keyspaceName)
                            .GetTableMetadata(tableName2);
             Assert.True(table.TableColumns.Count() == 4);
+            Assert.AreEqual("a, b, c", String.Join(", ", table.PartitionKeys.Select(p => p.Name)));
 
             string tableName3 = TestUtils.GetUniqueTableName().ToLower();
             cql = "CREATE TABLE " + tableName3 + " ( " +
@@ -452,6 +506,8 @@ namespace Cassandra.IntegrationTests.Core
                            .GetKeyspace(keyspaceName)
                            .GetTableMetadata(tableName3);
             Assert.True(table.TableColumns.Count() == 4);
+            //Just 1 partition key
+            Assert.AreEqual("a", String.Join(", ", table.PartitionKeys.Select(p => p.Name)));
         }
 
         [Test]
@@ -459,7 +515,7 @@ namespace Cassandra.IntegrationTests.Core
         {
             string keyspaceName = TestUtils.GetUniqueKeyspaceName();
             string tableName = TestUtils.GetUniqueTableName().ToLower();
-            ITestCluster testCluster = TestClusterManager.GetTestCluster(DefaultNodeCount);
+            ITestCluster testCluster = TestClusterManager.GetNonShareableTestCluster(DefaultNodeCount);
             var cluster = testCluster.Cluster;
             var session = testCluster.Session;
 
@@ -487,6 +543,7 @@ namespace Cassandra.IntegrationTests.Core
                                .GetTableMetadata(tableName);
             Assert.NotNull(table);
             Assert.True(table.TableColumns.Count() == 7);
+            Assert.AreEqual("a, b", String.Join(", ", table.PartitionKeys.Select(p => p.Name)));
         }
 
         [Test, TestCassandraVersion(2, 1)]
@@ -494,7 +551,7 @@ namespace Cassandra.IntegrationTests.Core
         {
             string keyspaceName = TestUtils.GetUniqueKeyspaceName();
             string tableName = "products";
-            ITestCluster testCluster = TestClusterManager.GetTestCluster(DefaultNodeCount);
+            ITestCluster testCluster = TestClusterManager.GetNonShareableTestCluster(DefaultNodeCount);
             var cluster = testCluster.Cluster;
             var session = testCluster.Session;
             session.CreateKeyspace(keyspaceName);
@@ -524,7 +581,7 @@ namespace Cassandra.IntegrationTests.Core
         {
             string keyspaceName = TestUtils.GetUniqueKeyspaceName();
             string tableName = TestUtils.GetUniqueTableName().ToLower();
-            ITestCluster testCluster = TestClusterManager.GetTestCluster(DefaultNodeCount);
+            ITestCluster testCluster = TestClusterManager.GetNonShareableTestCluster(DefaultNodeCount);
             var cluster = testCluster.Cluster;
             var session = testCluster.Session;
 
@@ -572,6 +629,143 @@ namespace Cassandra.IntegrationTests.Core
                            .GetTableMetadata(tableName);
             Assert.AreEqual(columnLength + 1, table.TableColumns.Length);
             Assert.AreEqual(1, table.TableColumns.Count(c => c.Name == "added_col"));
+        }
+
+        [Test]
+        public void TableMetadataNestedCollectionsTest()
+        {
+            if (CassandraVersion < Version.Parse("2.1.3"))
+            {
+                Assert.Ignore("Nested frozen collections are supported in 2.1.3 and above");
+            }
+            var keyspaceName = TestUtils.GetUniqueKeyspaceName();
+            const string tableName = "tbl_nested_cols_meta";
+            ITestCluster testCluster = TestClusterManager.GetNonShareableTestCluster(DefaultNodeCount);
+            var cluster = testCluster.Cluster;
+            var session = testCluster.Session;
+
+            session.CreateKeyspaceIfNotExists(keyspaceName);
+            session.ChangeKeyspace(keyspaceName);
+
+            session.Execute(String.Format("CREATE TABLE {0} (" +
+                                          "id uuid primary key, " +
+                                          "map1 map<text, frozen<list<text>>>," +
+                                          "map2 map<int, frozen<map<text, bigint>>>," +
+                                          "list1 list<frozen<map<uuid, int>>>)", tableName));
+            var table = cluster.Metadata
+                               .GetKeyspace(keyspaceName)
+                               .GetTableMetadata(tableName);
+
+            Assert.AreEqual(4, table.TableColumns.Length);
+            var map1 = table.TableColumns.First(c => c.Name == "map1");
+            Assert.AreEqual(ColumnTypeCode.Map, map1.TypeCode);
+            Assert.IsInstanceOf<MapColumnInfo>(map1.TypeInfo);
+            var map1Info = (MapColumnInfo)map1.TypeInfo;
+            Assert.AreEqual(ColumnTypeCode.Varchar, map1Info.KeyTypeCode);
+            Assert.AreEqual(ColumnTypeCode.List, map1Info.ValueTypeCode);
+            Assert.IsInstanceOf<ListColumnInfo>(map1Info.ValueTypeInfo);
+            var map1ListInfo = (ListColumnInfo)map1Info.ValueTypeInfo;
+            Assert.AreEqual(ColumnTypeCode.Varchar, map1ListInfo.ValueTypeCode);
+
+            var map2 = table.TableColumns.First(c => c.Name == "map2");
+            Assert.AreEqual(ColumnTypeCode.Map, map2.TypeCode);
+            Assert.IsInstanceOf<MapColumnInfo>(map2.TypeInfo);
+            var map2Info = (MapColumnInfo)map2.TypeInfo;
+            Assert.AreEqual(ColumnTypeCode.Int, map2Info.KeyTypeCode);
+            Assert.AreEqual(ColumnTypeCode.Map, map2Info.ValueTypeCode);
+            Assert.IsInstanceOf<MapColumnInfo>(map2Info.ValueTypeInfo);
+            var map2MapInfo = (MapColumnInfo)map2Info.ValueTypeInfo;
+            Assert.AreEqual(ColumnTypeCode.Varchar, map2MapInfo.KeyTypeCode);
+            Assert.AreEqual(ColumnTypeCode.Bigint, map2MapInfo.ValueTypeCode);
+
+            var list1 = table.TableColumns.First(c => c.Name == "list1");
+            Assert.AreEqual(ColumnTypeCode.List, list1.TypeCode);
+            Assert.IsInstanceOf<ListColumnInfo>(list1.TypeInfo);
+            var list1Info = (ListColumnInfo)list1.TypeInfo;
+            Assert.AreEqual(ColumnTypeCode.Map, list1Info.ValueTypeCode);
+            Assert.IsInstanceOf<MapColumnInfo>(list1Info.ValueTypeInfo);
+            var list1MapInfo = (MapColumnInfo)list1Info.ValueTypeInfo;
+            Assert.AreEqual(ColumnTypeCode.Uuid, list1MapInfo.KeyTypeCode);
+            Assert.AreEqual(ColumnTypeCode.Int, list1MapInfo.ValueTypeCode);
+        }
+
+        [Test]
+        public void TableMetadataCassandra22Types()
+        {
+            if (CassandraVersion < Version.Parse("2.2"))
+            {
+                Assert.Ignore("Date, Time, SmallInt and TinyInt are supported in 2.2 and above");
+            }
+            var keyspaceName = TestUtils.GetUniqueKeyspaceName();
+            const string tableName = "tbl_cass22_types";
+            ITestCluster testCluster = TestClusterManager.GetNonShareableTestCluster(DefaultNodeCount);
+            var cluster = testCluster.Cluster;
+            var session = testCluster.Session;
+
+            session.CreateKeyspaceIfNotExists(keyspaceName);
+            session.ChangeKeyspace(keyspaceName);
+
+            session.Execute(String.Format("CREATE TABLE {0} (" +
+                                          "id uuid primary key, " +
+                                          "map1 map<smallint, date>," +
+                                          "s smallint," +
+                                          "b tinyint," +
+                                          "d date," +
+                                          "t time)", tableName));
+            var table = cluster.Metadata
+                               .GetKeyspace(keyspaceName)
+                               .GetTableMetadata(tableName);
+
+            Assert.AreEqual(6, table.TableColumns.Length);
+            CollectionAssert.AreEqual(table.PartitionKeys, new[] { table.TableColumns.First(c => c.Name == "id") });
+            var map1 = table.TableColumns.First(c => c.Name == "map1");
+            Assert.AreEqual(ColumnTypeCode.Map, map1.TypeCode);
+            Assert.IsInstanceOf<MapColumnInfo>(map1.TypeInfo);
+            var map1Info = (MapColumnInfo)map1.TypeInfo;
+            Assert.AreEqual(ColumnTypeCode.SmallInt, map1Info.KeyTypeCode);
+            Assert.AreEqual(ColumnTypeCode.Date, map1Info.ValueTypeCode);
+
+            Assert.AreEqual(ColumnTypeCode.SmallInt, table.TableColumns.First(c => c.Name == "s").TypeCode);
+            Assert.AreEqual(ColumnTypeCode.TinyInt, table.TableColumns.First(c => c.Name == "b").TypeCode);
+            Assert.AreEqual(ColumnTypeCode.Date, table.TableColumns.First(c => c.Name == "d").TypeCode);
+            Assert.AreEqual(ColumnTypeCode.Time, table.TableColumns.First(c => c.Name == "t").TypeCode);
+        }
+
+        /// <summary>
+        /// Performs several schema changes and tries to query the newly created keyspaces and tables asap in a multiple node cluster, trying to create a race condition.
+        /// </summary>
+        [Test]
+        public void SchemaAgreementRaceTest()
+        {
+            var testCluster = TestClusterManager.GetNonShareableTestCluster(3, DefaultMaxClusterCreateRetries, true, false);
+            var queries = new[]
+            {
+                "CREATE KEYSPACE ks1 WITH replication = {'class': 'SimpleStrategy', 'replication_factor' : 3};",
+                "CREATE TABLE ks1.tbl1 (id uuid PRIMARY KEY, value text)",
+                "SELECT * FROM ks1.tbl1",
+                "SELECT * FROM ks1.tbl1 where id = d54cb06d-d168-45a0-b1b2-9f5c75435d3d",
+                "CREATE KEYSPACE ks2 WITH replication = {'class': 'SimpleStrategy', 'replication_factor' : 3};",
+                "CREATE TABLE ks2.tbl2 (id uuid PRIMARY KEY, value text)",
+                "SELECT * FROM ks2.tbl2",
+                "SELECT * FROM ks2.tbl2",
+                "CREATE TABLE ks2.tbl3 (id uuid PRIMARY KEY, value text)",
+                "SELECT * FROM ks2.tbl3",
+                "SELECT * FROM ks2.tbl3",
+                "CREATE TABLE ks2.tbl4 (id uuid PRIMARY KEY, value text)",
+                "SELECT * FROM ks2.tbl4",
+                "SELECT * FROM ks2.tbl4",
+                "SELECT * FROM ks2.tbl4"
+            };
+            using (var cluster = Cluster.Builder().AddContactPoint(testCluster.InitialContactPoint).Build())
+            {
+                var session = cluster.Connect();
+                //warm up the pool
+                TestHelper.Invoke(() => session.Execute("SELECT key from system.local"), 10);
+                foreach (var q in queries)
+                {
+                    Assert.DoesNotThrow(() => session.Execute(q));
+                }
+            }
         }
     }
 }

@@ -16,6 +16,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Net;
 using System.Threading;
@@ -28,19 +29,16 @@ namespace Cassandra.IntegrationTests.FoundBugs
     [TestFixture, Category("long")]
     public class FoundBugTests : TestGlobals
     {
-        private readonly Logger _logger = new Logger(typeof(FoundBugTests));
-
         [Test]
         public void Jira_CSHARP_80_82()
         {
             try
             {
-                using (Cluster cluster = Cluster.Builder().AddContactPoint("0.0.0.0").Build())
+                using (var cluster = Cluster.Builder().AddContactPoint("0.0.0.0").Build())
                 {
-                    ISession session = null;
                     try
                     {
-                        using (session = cluster.Connect())
+                        using (cluster.Connect())
                         {
                         }
                     }
@@ -76,7 +74,6 @@ namespace Cassandra.IntegrationTests.FoundBugs
             }
 
             nonShareableTestCluster.StopForce(1);
-            List<Host> hosts = new List<Host>();
 
             // now wait until node is down
             bool noHostAvailableExceptionWasCaught = false;
@@ -84,7 +81,7 @@ namespace Cassandra.IntegrationTests.FoundBugs
             {
                 try
                 {
-                    ISession unusedSession = nonShareableTestCluster.Cluster.Connect();
+                    nonShareableTestCluster.Cluster.Connect();
                 }
                 catch (Exception e)
                 {
@@ -94,7 +91,7 @@ namespace Cassandra.IntegrationTests.FoundBugs
                     }
                     else
                     {
-                        _logger.Warning("Something other than a NoHostAvailableException was thrown: " + e.GetType() + ", waiting another second ...");
+                        Trace.TraceWarning("Something other than a NoHostAvailableException was thrown: " + e.GetType() + ", waiting another second ...");
                         Thread.Sleep(1000);
                     }
                 }
@@ -108,14 +105,14 @@ namespace Cassandra.IntegrationTests.FoundBugs
             {
                 try
                 {
-                    var result = session.Execute(query);
+                    session.Execute(query);
                     hostWasReconnected = true;
                 }
                 catch (Exception e)
                 {
                     if (e.GetType() == typeof (Cassandra.NoHostAvailableException))
                     {
-                        _logger.Info("Host still not up yet, waiting another one second ... ");
+                        Trace.TraceInformation("Host still not up yet, waiting another one second ... ");
                         Thread.Sleep(1000);
                     }
                     else

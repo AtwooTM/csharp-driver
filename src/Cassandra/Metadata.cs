@@ -20,6 +20,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Threading;
+using System.Threading.Tasks;
+using Cassandra.Requests;
+using Cassandra.Tasks;
 
 namespace Cassandra
 {
@@ -31,9 +34,12 @@ namespace Cassandra
     {
         private const string SelectKeyspaces = "SELECT * FROM system.schema_keyspaces";
         private const string SelectSingleKeyspace = "SELECT * FROM system.schema_keyspaces WHERE keyspace_name = '{0}'";
+        private const string SelectSchemaVersionPeers = "SELECT schema_version FROM system.peers";
+        private const string SelectSchemaVersionLocal = "SELECT schema_version FROM system.local";
         private static readonly Logger Logger = new Logger(typeof(ControlConnection));
         private volatile TokenMap _tokenMap;
         private volatile ConcurrentDictionary<string, KeyspaceMetadata> _keyspaces = new ConcurrentDictionary<string,KeyspaceMetadata>(1, 0);
+        private readonly Configuration _config;
         public event HostsEventHandler HostsEvent;
         public event SchemaChangedEventHandler SchemaChangedEvent;
 
@@ -52,10 +58,12 @@ namespace Cassandra
 
         internal Hosts Hosts { get; private set; }
 
-        internal Metadata(IReconnectionPolicy rp)
+        internal Metadata(Configuration config)
         {
-            Hosts = new Hosts(rp);
+            _config = config;
+            Hosts = new Hosts(config.Policies.ReconnectionPolicy);
             Hosts.Down += OnHostDown;
+            Hosts.Up += OnHostUp;
         }
 
         public void Dispose()
@@ -94,7 +102,7 @@ namespace Cassandra
             Hosts.SetDownIfExists(address);
         }
 
-        private void OnHostDown(Host h, DateTimeOffset nextUpTime)
+        private void OnHostDown(Host h, long reconnectionDelay)
         {
             if (HostsEvent != null)
             {
@@ -102,20 +110,19 @@ namespace Cassandra
             }
         }
 
+        private void OnHostUp(Host h)
+        {
+            if (HostsEvent != null)
+            {
+                HostsEvent(h, new HostsEventArgs { Address = h.Address, What = HostsEventArgs.Kind.Up });
+            }
+        }
         internal void BringUpHost(IPEndPoint address, object sender = null)
         {
             //Add the host if not already present
             var host = Hosts.Add(address);
             //Bring it UP
-            if (!host.BringUpIfDown())
-            {
-                //If it was already UP, its OK
-                return;
-            }
-            if (HostsEvent != null)
-            {
-                HostsEvent(sender ?? this, new HostsEventArgs {Address = address, What = HostsEventArgs.Kind.Up});
-            }
+            host.BringUpIfDown();
         }
 
         /// <summary>
@@ -233,6 +240,34 @@ namespace Cassandra
         }
 
         /// <summary>
+        /// Gets the definition associated with a User Defined Function from Cassandra
+        /// </summary>
+        /// <returns>The function metadata or null if not found.</returns>
+        public FunctionMetadata GetFunction(string keyspace, string name, string[] signature)
+        {
+            KeyspaceMetadata ksMetadata;
+            if (!_keyspaces.TryGetValue(keyspace, out ksMetadata))
+            {
+                return null;
+            }
+            return ksMetadata.GetFunction(name, signature);
+        }
+
+        /// <summary>
+        /// Gets the definition associated with a aggregate from Cassandra
+        /// </summary>
+        /// <returns>The aggregate metadata or null if not found.</returns>
+        public AggregateMetadata GetAggregate(string keyspace, string name, string[] signature)
+        {
+            KeyspaceMetadata ksMetadata;
+            if (!_keyspaces.TryGetValue(keyspace, out ksMetadata))
+            {
+                return null;
+            }
+            return ksMetadata.GetAggregate(name, signature);
+        }
+
+        /// <summary>
         /// Updates the keyspace and token information
         /// </summary>
         public bool RefreshSchema(string keyspace = null, string table = null)
@@ -280,7 +315,7 @@ namespace Cassandra
         public void ShutDown(int timeoutMs = Timeout.Infinite)
         {
             //it is really not required to be called, left as it is part of the public API
-            //unreference the control connection
+            //dereference the control connection
             ControlConnection = null;
         }
 
@@ -319,6 +354,73 @@ namespace Cassandra
             if (_keyspaces.TryGetValue(keyspaceName, out ksMetadata))
             {
                 ksMetadata.ClearTableMetadata(tableName);
+            }
+        }
+
+        internal void ClearFunction(string keyspaceName, string functionName, string[] signature)
+        {
+            KeyspaceMetadata ksMetadata;
+            if (_keyspaces.TryGetValue(keyspaceName, out ksMetadata))
+            {
+                ksMetadata.ClearFunction(functionName, signature);
+            }
+        }
+
+        internal void ClearAggregate(string keyspaceName, string aggregateName, string[] signature)
+        {
+            KeyspaceMetadata ksMetadata;
+            if (_keyspaces.TryGetValue(keyspaceName, out ksMetadata))
+            {
+                ksMetadata.ClearAggregate(aggregateName, signature);
+            }
+        }
+
+        /// <summary>
+        /// Waits until that the schema version in all nodes is the same or the waiting time passed.
+        /// This method blocks the calling thread.
+        /// </summary>
+        internal void WaitForSchemaAgreement(Connection connection)
+        {
+            if (Hosts.Count == 1)
+            {
+                //If there is just one node, the schema is up to date in all nodes :)
+                return;
+            }
+            var start = DateTime.Now;
+            var waitSeconds = _config.ProtocolOptions.MaxSchemaAgreementWaitSeconds;
+            Logger.Info("Waiting for schema agreement");
+            try
+            {
+                var totalVersions = 0;
+                while (DateTime.Now.Subtract(start).TotalSeconds < waitSeconds)
+                {
+                    var schemaVersionLocalQuery = new QueryRequest(connection.ProtocolVersion, SelectSchemaVersionLocal, false, QueryProtocolOptions.Default);
+                    var schemaVersionPeersQuery = new QueryRequest(connection.ProtocolVersion, SelectSchemaVersionPeers, false, QueryProtocolOptions.Default);
+                    var queries = new [] { connection.Send(schemaVersionLocalQuery), connection.Send(schemaVersionPeersQuery) };
+                    // ReSharper disable once CoVariantArrayConversion
+                    Task.WaitAll(queries, _config.ClientOptions.QueryAbortTimeout);
+                    var versions = new HashSet<Guid>
+                    {
+                        ControlConnection.GetRowSet(queries[0].Result).First().GetValue<Guid>("schema_version")
+                    };
+                    var peerVersions = ControlConnection.GetRowSet(queries[1].Result).Select(r => r.GetValue<Guid>("schema_version"));
+                    foreach (var v in peerVersions)
+                    {
+                        versions.Add(v);
+                    }
+                    totalVersions = versions.Count;
+                    if (versions.Count == 1)
+                    {
+                        return;
+                    }
+                    Thread.Sleep(500);
+                }
+                Logger.Info(String.Format("Waited for schema agreement, still {0} schema versions in the cluster.", totalVersions));
+            }
+            catch (Exception ex)
+            {
+                //Exceptions are not fatal
+                Logger.Error("There was an exception while trying to retrieve schema versions", ex);
             }
         }
     }

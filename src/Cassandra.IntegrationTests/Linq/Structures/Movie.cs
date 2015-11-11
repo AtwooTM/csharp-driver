@@ -3,6 +3,7 @@ using System.Diagnostics;
 using Cassandra.Data.Linq;
 using Cassandra.IntegrationTests.TestBase;
 using NUnit.Framework;
+#pragma warning disable 618
 
 namespace Cassandra.IntegrationTests.Linq.Structures
 {
@@ -55,7 +56,12 @@ namespace Cassandra.IntegrationTests.Linq.Structures
             Assert.AreEqual(expectedMovie.Year, actualMovie.Year);
         }
 
-        public static bool AssertListContains(List<Movie> expectedMovies, Movie actualMovie)
+        public static void AssertListContains(List<Movie> expectedMovies, Movie actualMovie)
+        {
+            Assert.IsTrue(ListContains(expectedMovies, actualMovie));
+        }
+
+        public static bool ListContains(List<Movie> expectedMovies, Movie actualMovie)
         {
             foreach (var expectedMovie in expectedMovies)
             {
@@ -64,7 +70,7 @@ namespace Cassandra.IntegrationTests.Linq.Structures
                     AssertEquals(actualMovie, expectedMovie);
                     return true;
                 }
-                catch (AssertionException e) { }
+                catch (AssertionException) { }
             }
             return false;
         }

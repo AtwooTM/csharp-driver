@@ -23,6 +23,7 @@ using System.Linq;
 using Moq;
 using System.Threading.Tasks;
 using System.Threading;
+﻿using Cassandra.Requests;
 
 namespace Cassandra.Tests
 {
@@ -202,6 +203,7 @@ namespace Cassandra.Tests
                     }
                 }
             };
+            TestHelper.ParallelInvoke(action, 100);
         }
 
         [Test]
@@ -213,7 +215,6 @@ namespace Cassandra.Tests
                 TestHelper.CreateHost("0.0.0.1", "dc1"),
                 TestHelper.CreateHost("0.0.0.2", "dc2")
             };
-            var localHostsLength = hostList.Count(h => h.Datacenter == "dc1");
             var clusterMock = new Mock<ICluster>();
             clusterMock
                 .Setup(c => c.AllHosts())
@@ -325,7 +326,6 @@ namespace Cassandra.Tests
                 TestHelper.CreateHost("0.0.0.9", "dc1"),
                 TestHelper.CreateHost("0.0.0.10", "dc2")
             };
-            var localHostsLength = hostList.Count(h => h.Datacenter == "dc1");
             const string localDc = "dc1";
 
             var clusterMock = new Mock<ICluster>();
@@ -359,7 +359,6 @@ namespace Cassandra.Tests
                 TestHelper.CreateHost("0.0.0.9", "dc1"),
                 TestHelper.CreateHost("0.0.0.10", "dc2")
             };
-            var localHostsLength = hostList.Count(h => h.Datacenter == "dc1");
             const string localDc = "dc1";
             //to remove the host 3
             var hostToRemove = hostList.First(h => TestHelper.GetLastAddressByte(h) == 3);
@@ -423,23 +422,22 @@ namespace Cassandra.Tests
         [Test]
         public void DowngradingConsistencyRetryTest()
         {
-            var dummyStatement = new SimpleStatement().SetRetryPolicy(DowngradingConsistencyRetryPolicy.Instance);
-
-            var handler = new RequestHandler<RowSet>(null, null, dummyStatement);
+            var policy = DowngradingConsistencyRetryPolicy.Instance;
+            var dummyStatement = new SimpleStatement().SetRetryPolicy(policy);
             //Retry if 1 of 2 replicas are alive
-            var decision = handler.GetRetryDecision(new UnavailableException(ConsistencyLevel.Two, 2, 1));
+            var decision = RequestExecution<RowSet>.GetRetryDecision(new UnavailableException(ConsistencyLevel.Two, 2, 1), policy, dummyStatement, 0);
             Assert.True(decision != null && decision.DecisionType == RetryDecision.RetryDecisionType.Retry);
 
             //Retry if 2 of 3 replicas are alive
-            decision = handler.GetRetryDecision(new UnavailableException(ConsistencyLevel.Three, 3, 2));
+            decision = RequestExecution<RowSet>.GetRetryDecision(new UnavailableException(ConsistencyLevel.Three, 3, 2), policy, dummyStatement, 0);
             Assert.True(decision != null && decision.DecisionType == RetryDecision.RetryDecisionType.Retry);
 
             //Throw if 0 replicas are alive
-            decision = handler.GetRetryDecision(new UnavailableException(ConsistencyLevel.Three, 3, 0));
+            decision = RequestExecution<RowSet>.GetRetryDecision(new UnavailableException(ConsistencyLevel.Three, 3, 0), policy, dummyStatement, 0);
             Assert.True(decision != null && decision.DecisionType == RetryDecision.RetryDecisionType.Rethrow);
 
             //Retry if 1 of 3 replicas is alive
-            decision = handler.GetRetryDecision(new ReadTimeoutException(ConsistencyLevel.All, 3, 1, false));
+            decision = RequestExecution<RowSet>.GetRetryDecision(new ReadTimeoutException(ConsistencyLevel.All, 3, 1, false), policy, dummyStatement, 0);
             Assert.True(decision != null && decision.DecisionType == RetryDecision.RetryDecisionType.Retry);
         }
 

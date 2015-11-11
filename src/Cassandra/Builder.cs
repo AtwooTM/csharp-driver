@@ -28,6 +28,7 @@ namespace Cassandra
     public class Builder : IInitializer
     {
         private readonly List<IPEndPoint> _addresses = new List<IPEndPoint>();
+        private const int DefaultQueryAbortTimeout = 20000;
         private PoolingOptions _poolingOptions;
         private SocketOptions _socketOptions = new SocketOptions();
         private IAuthInfoProvider _authInfoProvider;
@@ -38,13 +39,15 @@ namespace Cassandra
 
         private ILoadBalancingPolicy _loadBalancingPolicy;
         private int _port = ProtocolOptions.DefaultPort;
-        private int _queryAbortTimeout = Timeout.Infinite;
+        private int _queryAbortTimeout = DefaultQueryAbortTimeout;
+
         private QueryOptions _queryOptions = new QueryOptions();
         private IReconnectionPolicy _reconnectionPolicy;
         private IRetryPolicy _retryPolicy;
         private SSLOptions _sslOptions;
         private bool _withoutRowSetBuffering;
         private IAddressTranslator _addressTranslator = new DefaultAddressTranslator();
+        private ISpeculativeExecutionPolicy _speculativeExecutionPolicy;
 
         /// <summary>
         ///  The pooling options used by this builder.
@@ -88,8 +91,8 @@ namespace Cassandra
             var policies = new Policies(
                 _loadBalancingPolicy ?? Policies.DefaultLoadBalancingPolicy,
                 _reconnectionPolicy ?? Policies.DefaultReconnectionPolicy,
-                _retryPolicy ?? Policies.DefaultRetryPolicy
-                );
+                _retryPolicy ?? Policies.DefaultRetryPolicy,
+                _speculativeExecutionPolicy ?? Policies.DefaultSpeculativeExecutionPolicy);
 
             return new Configuration(policies,
                                      new ProtocolOptions(_port, _sslOptions).SetCompression(_compression).SetCustomCompressor(_customCompressor),
@@ -104,15 +107,18 @@ namespace Cassandra
         }
 
         /// <summary>
-        ///  The port to use to connect to the Cassandra host. If not set through this
+        ///  The port to use to connect to all Cassandra hosts. If not set through this
         ///  method, the default port (9042) will be used instead.
         /// </summary>
         /// <param name="port"> the port to set. </param>
-        /// 
         /// <returns>this Builder</returns>
         public Builder WithPort(int port)
         {
             _port = port;
+            foreach (var addr in _addresses)
+            {
+                addr.Port = port;
+            }
             return this;
         }
 
@@ -188,7 +194,7 @@ namespace Cassandra
         /// <returns>this Builder</returns>
         public Builder AddContactPoint(IPAddress address)
         {
-            AddContactPoint(new IPEndPoint(address, ProtocolOptions.DefaultPort));
+            AddContactPoint(new IPEndPoint(address, _port));
             return this;
         }
 
@@ -248,7 +254,7 @@ namespace Cassandra
         /// <returns>this Builder</returns>
         public Builder AddContactPoints(IEnumerable<IPAddress> addresses)
         {
-            AddContactPoints(addresses.Select(p => new IPEndPoint(p, ProtocolOptions.DefaultPort)));
+            AddContactPoints(addresses.Select(p => new IPEndPoint(p, _port)));
             return this;
         }
 
@@ -286,7 +292,6 @@ namespace Cassandra
         ///  <link>Policies.DefaultLoadBalancingPolicy</link> will be used instead.</p>
         /// </summary>
         /// <param name="policy"> the load balancing policy to use </param>
-        /// 
         /// <returns>this Builder</returns>
         public Builder WithLoadBalancingPolicy(ILoadBalancingPolicy policy)
         {
@@ -319,6 +324,20 @@ namespace Cassandra
         public Builder WithRetryPolicy(IRetryPolicy policy)
         {
             _retryPolicy = policy;
+            return this;
+        }
+
+        /// <summary>
+        ///  Configure the speculative execution to use for the new cluster. 
+        /// <para> 
+        /// If no speculative execution policy is set through this method, <see cref="Policies.DefaultSpeculativeExecutionPolicy"/> will be used instead.
+        /// </para>
+        /// </summary>
+        /// <param name="policy"> the speculative execution policy to use </param>
+        /// <returns>this Builder</returns>
+        public Builder WithSpeculativeExecutionPolicy(ISpeculativeExecutionPolicy policy)
+        {
+            _speculativeExecutionPolicy = policy;
             return this;
         }
 
@@ -377,12 +396,17 @@ namespace Cassandra
             return this;
         }
 
-
         /// <summary>
-        ///  Sets the timeout for a single query within created cluster.
-        ///  After the expiry of the timeout, query will be aborted.
-        ///  Default timeout value is set to <c>Infinity</c>
+        /// Specifies the number of milliseconds that the driver should wait for the response before the query times out in a synchronous operation.
+        /// <para>
+        /// This will cause that synchronous operations like <see cref="ISession.Execute(string)"/> to throw a <see cref="System.TimeoutException"/> 
+        /// after the specified number of milliseconds.
+        /// </para>
+        /// Default timeout value is set to <code>20,000</code> (20 seconds).
         /// </summary>
+        /// <remarks>
+        /// If you want to define a read timeout at a lower level, you can use <see cref="Cassandra.SocketOptions.SetReadTimeoutMillis(int)"/>.
+        /// </remarks>
         /// <param name="queryAbortTimeout">Timeout specified in milliseconds.</param>
         /// <returns>this builder</returns>
         public Builder WithQueryTimeout(int queryAbortTimeout)

@@ -15,6 +15,8 @@
 //
 
 using System;
+using System.Linq;
+using Cassandra.Requests;
 
 namespace Cassandra
 {
@@ -34,7 +36,7 @@ namespace Cassandra
     /// </summary>
     public class BoundStatement : Statement
     {
-        private readonly PreparedStatement _statement;
+        private readonly PreparedStatement _preparedStatement;
         private RoutingKey _routingKey;
 
         /// <summary>
@@ -42,7 +44,7 @@ namespace Cassandra
         /// </summary>
         public PreparedStatement PreparedStatement
         {
-            get { return _statement; }
+            get { return _preparedStatement; }
         }
 
 
@@ -64,15 +66,27 @@ namespace Cassandra
         }
 
         /// <summary>
+        /// Initializes a new instance of the Cassandra.BoundStatement class
+        /// </summary>
+        public BoundStatement()
+        {
+            //Default constructor for client test and mocking frameworks
+        }
+
+        /// <summary>
         ///  Creates a new <c>BoundStatement</c> from the provided prepared
         ///  statement.
         /// </summary>
         /// <param name="statement"> the prepared statement from which to create a <c>BoundStatement</c>.</param>
         public BoundStatement(PreparedStatement statement)
         {
-            _statement = statement;
+            _preparedStatement = statement;
             _routingKey = statement.RoutingKey;
             SetConsistencyLevel(statement.ConsistencyLevel);
+            if (statement.IsIdempotent != null)
+            {
+                SetIdempotence(statement.IsIdempotent.Value);
+            }
         }
         
         /// <summary>
@@ -84,7 +98,7 @@ namespace Cassandra
         /// <param name="routingKeyComponents"> the raw (binary) values to compose the routing key.</param>
         public BoundStatement SetRoutingKey(params RoutingKey[] routingKeyComponents)
         {
-            this._routingKey = RoutingKey.Compose(routingKeyComponents);
+            _routingKey = RoutingKey.Compose(routingKeyComponents);
             return this;
         }
 
@@ -127,9 +141,57 @@ namespace Cassandra
 
         internal override IQueryRequest CreateBatchRequest(int protocolVersion)
         {
-            //The consistency of each query will be not used.
-            var options = QueryProtocolOptions.CreateFromQuery(this, Cassandra.ConsistencyLevel.Any);
+            //Uses the default query options as the individual options of the query will be ignored
+            var options = QueryProtocolOptions.CreateFromQuery(this, new QueryOptions());
             return new ExecuteRequest(protocolVersion, PreparedStatement.Id, PreparedStatement.Metadata, IsTracing, options);
+        }
+
+        internal void CalculateRoutingKey(bool useNamedParameters, int[] routingIndexes, string[] routingNames, object[] valuesByPosition, object[] rawValues)
+        {
+            if (_routingKey != null)
+            {
+                //The routing key was specified by the user
+                return;
+            }
+            if (routingIndexes != null)
+            {
+                var keys = new RoutingKey[routingIndexes.Length];
+                for (var i = 0; i < routingIndexes.Length; i++)
+                {
+                    var index = routingIndexes[i];
+                    var key = TypeCodec.Encode(ProtocolVersion, valuesByPosition[index]);
+                    if (key == null)
+                    {
+                        //The partition key can not be null
+                        //Get out and let any node reply a Response Error
+                        return;
+                    }
+                    keys[i] = new RoutingKey(key);
+                }
+                SetRoutingKey(keys);
+                return;
+            }
+            if (routingNames != null && useNamedParameters)
+            {
+                var keys = new RoutingKey[routingNames.Length];
+                var routingValues = Utils.GetValues(routingNames, rawValues[0]).ToArray();
+                if (routingValues.Length != keys.Length)
+                {
+                    //The routing names are not valid
+                    return;
+                }
+                for (var i = 0; i < routingValues.Length; i++)
+                {
+                    var key = TypeCodec.Encode(ProtocolVersion, routingValues[i]);
+                    if (key == null)
+                    {
+                        //The partition key can not be null
+                        return;
+                    }
+                    keys[i] = new RoutingKey(key);
+                }
+                SetRoutingKey(keys);
+            }
         }
     }
 }

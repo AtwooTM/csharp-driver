@@ -1,7 +1,9 @@
-﻿using System.Collections.Concurrent;
+﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Cassandra.Tasks;
 
 namespace Cassandra.Mapping.Statements
 {
@@ -11,29 +13,43 @@ namespace Cassandra.Mapping.Statements
     internal class StatementFactory
     {
         private readonly ConcurrentDictionary<string, Task<PreparedStatement>> _statementCache;
+        private static readonly Logger Logger = new Logger(typeof(StatementFactory));
+
+        public int MaxPreparedStatementsThreshold { get; set; }
 
         public StatementFactory()
         {
+            MaxPreparedStatementsThreshold = 500;
             _statementCache = new ConcurrentDictionary<string, Task<PreparedStatement>>();
         }
 
         public Task<Statement> GetStatementAsync(ISession session, Cql cql)
         {
-            // Use a SimpleStatement if we're not supposed to prepare
             if (cql.QueryOptions.NoPrepare)
             {
-                Statement statement = new SimpleStatement(cql.Statement).Bind(cql.Arguments);
-                cql.QueryOptions.CopyOptionsToStatement(statement);
+                // Use a SimpleStatement if we're not supposed to prepare
+                Statement statement = new SimpleStatement(cql.Statement, cql.Arguments);
+                SetStatementProperties(statement, cql);
                 return TaskHelper.ToTask(statement);
             }
             return _statementCache
                 .GetOrAdd(cql.Statement, session.PrepareAsync)
                 .Continue(t =>
                 {
-                    var boundStatement = t.Result.Bind(cql.Arguments);
-                    cql.QueryOptions.CopyOptionsToStatement(boundStatement);
-                    return (Statement)boundStatement;
+                    if (_statementCache.Count > MaxPreparedStatementsThreshold)
+                    {
+                        Logger.Warning(String.Format("The prepared statement cache contains {0} queries. Use parameter markers for queries. You can configure this warning threshold using MappingConfiguration.SetMaxStatementPreparedThreshold() method.", _statementCache.Count));
+                    }
+                    Statement boundStatement = t.Result.Bind(cql.Arguments);
+                    SetStatementProperties(boundStatement, cql);
+                    return boundStatement;
                 });
+        }
+
+        private void SetStatementProperties(IStatement stmt, Cql cql)
+        {
+            cql.QueryOptions.CopyOptionsToStatement(stmt);
+            stmt.SetAutoPage(cql.AutoPage);
         }
 
         public Statement GetStatement(ISession session, Cql cql)
@@ -57,7 +73,7 @@ namespace Cassandra.Mapping.Statements
                     batch.Add(t.Result);
                 }
                 return batch;
-            }, TaskContinuationOptions.ExecuteSynchronously | TaskContinuationOptions.OnlyOnRanToCompletion);
+            }, TaskContinuationOptions.ExecuteSynchronously);
         }
 
         public BatchStatement GetBatchStatement(ISession session, IEnumerable<Cql> cqlToBatch)

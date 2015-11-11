@@ -1,4 +1,7 @@
-﻿namespace Cassandra.IntegrationTests.TestClusterManagement
+﻿using System.Collections.Generic;
+using NUnit.Framework;
+
+namespace Cassandra.IntegrationTests.TestClusterManagement
 {
     public interface ITestCluster
     {
@@ -6,22 +9,9 @@
         Builder Builder { get; set; }
         Cluster Cluster { get; set; }
         ISession Session { get; set; }
-        int Dc1NodeCount { get; set; }
-        int Dc2NodeCount { get; set; }
         string InitialContactPoint { get; set; }
         string ClusterIpPrefix { get; set; }
         string DefaultKeyspace { get; set; }
-        bool IsBeingCreated { get; set; }
-        bool IsCreated { get; set; }
-        bool IsStarted { get; set; }
-        bool IsUsingDefaultConfig { get; set; }
-        bool IsStarting { get; set; }
-        bool IsRemoved { get; set; }
-
-        /// <summary>
-        /// Initializes the test cluster, including creating and starting Cassandra nodes.
-        /// </summary>
-        void StartClusterAndClient();
 
         /// <summary>
         /// Stops all clients and Cassandra nodes.
@@ -34,14 +24,9 @@
         void Remove();
 
         /// <summary>
-        /// Waits for the cluster to be initialized and available to handle requests
+        /// Creates the cluster with the option provided
         /// </summary>
-        void SwitchToThisStartAndConnect();
-
-        /// <summary>
-        /// Creates the cluster with the option of starting it as well
-        /// </summary>
-        void Create(bool startCluster = true);
+        void Create(int nodeLength, TestClusterOptions options = null);
 
         /// <summary>
         /// Force Stop a specific node in the cluster
@@ -56,7 +41,17 @@
         /// <summary>
         /// Start a specific node in the cluster
         /// </summary>
-        void Start(int nodeIdToStart);
+        void Start(int nodeIdToStart, string additionalArgs = null);
+
+        /// <summary>
+        /// Starts the cluster
+        /// </summary>
+        void Start(string[] jvmArgs = null);
+
+        /// <summary>
+        /// Updates the yaml config
+        /// </summary>
+        void UpdateConfig(params string[] yamlChanges);
 
         /// <summary>
         /// Initialize the Builder, Cluster and Session objects associated with the current Test Cluster
@@ -83,9 +78,28 @@
         void DecommissionNode(int nodeId);
 
         /// <summary>
-        /// Puts focus on this cluster
-        /// This is relevant for CCM, all other tools should be a no-op
+        /// Pause the node (SIGSTOP) associated with provided node ID
         /// </summary>
-        void SwitchToThisCluster();
+        void PauseNode(int nodeId);
+
+        /// <summary>
+        /// Resumes the node (SIGCONT) associated with provided node ID
+        /// </summary>
+        void ResumeNode(int nodeId);
+    }
+
+    public class TestClusterOptions
+    {
+        public static readonly TestClusterOptions Default = new TestClusterOptions();
+
+        public bool UseVNodes { get; set; }
+
+        public bool UseSsl { get; set; }
+
+        public string[] CassandraYaml { get; set; }
+
+        public int Dc2NodeLength { get; set; }
+
+        public string[] JvmArgs { get; set; }
     }
 }

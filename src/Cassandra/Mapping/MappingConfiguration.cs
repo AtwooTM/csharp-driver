@@ -44,6 +44,15 @@ namespace Cassandra.Mapping
         internal StatementFactory StatementFactory { get; private set; }
 
         /// <summary>
+        /// Gets or sets the maximum amount of prepared statements before issuing a logger warning. Defaults to 500.
+        /// </summary>
+        public int MaxPreparedStatementsThreshold
+        {
+            get { return StatementFactory.MaxPreparedStatementsThreshold; }
+            set { StatementFactory.MaxPreparedStatementsThreshold = value; }
+        }
+
+        /// <summary>
         /// Creates a new instance of MappingConfiguration to store the mapping definitions to be used by the Mapper or Linq components.
         /// </summary>
         public MappingConfiguration()
@@ -62,6 +71,7 @@ namespace Cassandra.Mapping
         {
             if (typeConverter == null) throw new ArgumentNullException("typeConverter");
             _typeConverter = typeConverter;
+            MapperFactory = new MapperFactory(_typeConverter, new PocoDataFactory(_typeDefinitions));
             return this;
         }
 
@@ -111,6 +121,15 @@ namespace Cassandra.Mapping
             {
                 _typeDefinitions.Add(map);
             }
+            return this;
+        }
+
+        /// <summary>
+        /// Sets the maximum amount of prepared statements before issuing a logger warning. Defaults to 500.
+        /// </summary>
+        public MappingConfiguration SetMaxPreparedStatementsThreshold(int value)
+        {
+            MaxPreparedStatementsThreshold = value;
             return this;
         }
 

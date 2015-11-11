@@ -4,29 +4,24 @@ using Cassandra.Data.Linq;
 using Cassandra.IntegrationTests.TestBase;
 using Cassandra.Mapping;
 using NUnit.Framework;
+#pragma warning disable 618
+#pragma warning disable 612
 
 namespace Cassandra.IntegrationTests.Mapping.Tests
 {
     [Category("short")]
-    public class CqlClientTest : TestGlobals
+    public class CqlClientTest : SharedClusterTest
     {
         ISession _session = null;
-        private readonly Logger _logger = new Logger(typeof(Attributes));
         string _uniqueKsName;
 
-        [SetUp]
-        public void SetupTest()
+        protected override void TestFixtureSetUp()
         {
-            _session = TestClusterManager.GetTestCluster(1).Session;
+            base.TestFixtureSetUp();
+            _session = Session;
             _uniqueKsName = TestUtils.GetUniqueKeyspaceName();
             _session.CreateKeyspace(_uniqueKsName);
             _session.ChangeKeyspace(_uniqueKsName);
-        }
-
-        [TearDown]
-        public void TeardownTest()
-        {
-            _session.DeleteKeyspace(_uniqueKsName);
         }
 
         /// <summary>
@@ -36,10 +31,15 @@ namespace Cassandra.IntegrationTests.Mapping.Tests
         public void CqlClient_TwoInstancesBasedOnSameSession()
         {
             // Setup
-            var table1 = _session.GetTable<Poco1>();
+            MappingConfiguration config1 = new MappingConfiguration();
+            config1.MapperFactory.PocoDataFactory.AddDefinitionDefault(typeof(Poco1), () => LinqAttributeBasedTypeDefinition.DetermineAttributes(typeof(Poco1)));
+            var table1 = new Table<Poco1>(_session, config1);
             table1.Create();
             string cqlSelectAll1 = "SELECT * from " + table1.Name;
-            var table2 = _session.GetTable<Poco2>();
+
+            MappingConfiguration config2 = new MappingConfiguration();
+            config2.MapperFactory.PocoDataFactory.AddDefinitionDefault(typeof(Poco2), () => LinqAttributeBasedTypeDefinition.DetermineAttributes(typeof(Poco2)));
+            var table2 = new Table<Poco2>(_session, config2);
             table2.Create();
             string cqlSelectAll2 = "SELECT * from " + table2.Name;
 

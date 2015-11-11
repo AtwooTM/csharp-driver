@@ -1,8 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
 using Cassandra.Mapping;
+using Cassandra.Tasks;
 using Cassandra.Tests.Mapping.FluentMappings;
 using Cassandra.Tests.Mapping.Pocos;
 using Cassandra.Tests.Mapping.TestData;
@@ -42,7 +44,7 @@ namespace Cassandra.Tests.Mapping
                 .Verifiable();
             sessionMock
                 .Setup(s => s.PrepareAsync(It.IsAny<string>()))
-                .Returns<string>(cql => TaskHelper.ToTask(new PreparedStatement(null, null, cql, null)))
+                .Returns<string>(cql => TaskHelper.ToTask(GetPrepared(cql)))
                 .Verifiable();
             var mappingClient = GetMappingClient(sessionMock);
             //Execute Insert and wait
@@ -68,11 +70,11 @@ namespace Cassandra.Tests.Mapping
             var sessionMock = new Mock<ISession>(MockBehavior.Strict);
             sessionMock
                 .Setup(s => s.ExecuteAsync(It.IsAny<BoundStatement>()))
-                .Returns(TaskHelper.ToTask(new RowSet()))
+                .Returns(TestHelper.DelayedTask(new RowSet()))
                 .Verifiable();
             sessionMock
                 .Setup(s => s.PrepareAsync(It.IsAny<string>()))
-                .Returns<string>(cql => TaskHelper.ToTask(new PreparedStatement(null, null, cql, null)))
+                .Returns<string>(cql => TaskHelper.ToTask(GetPrepared(cql)))
                 .Verifiable();
             var mappingClient = GetMappingClient(sessionMock);
             //Execute
@@ -113,7 +115,7 @@ namespace Cassandra.Tests.Mapping
                 .Verifiable();
             sessionMock
                 .Setup(s => s.PrepareAsync(It.IsAny<string>()))
-                .Returns<string>(cql => TaskHelper.ToTask(new PreparedStatement(null, null, cql, null)))
+                .Returns<string>(cql => TestHelper.DelayedTask(GetPrepared(cql)))
                 .Verifiable();
 
             // Insert the new user
@@ -148,7 +150,7 @@ namespace Cassandra.Tests.Mapping
                 .Verifiable();
             sessionMock
                 .Setup(s => s.PrepareAsync(It.IsAny<string>()))
-                .Returns<string>(cql => TaskHelper.ToTask(new PreparedStatement(null, null, cql, null)))
+                .Returns<string>(cql => TaskHelper.ToTask(GetPrepared(cql)))
                 .Verifiable();
             var mapper = GetMappingClient(sessionMock);
             mapper.Insert(album);
@@ -157,6 +159,98 @@ namespace Cassandra.Tests.Mapping
                 stmt.PreparedStatement.Cql == "INSERT INTO Album (Id, Name, PublishingDate, Songs) VALUES (?, ?, ?, ?)"
                 )), Times.Exactly(1));
             sessionMock.Verify();
+        }
+
+        [Test]
+        public void Insert_Poco_Returns_WhenResponse_IsReceived()
+        {
+            var newUser = new InsertUser
+            {
+                Id = Guid.NewGuid(),
+                Name = "Dummy"
+            };
+
+            var rowsetReturned = false;
+            var sessionMock = new Mock<ISession>(MockBehavior.Strict);
+            sessionMock
+                .Setup(s => s.ExecuteAsync(It.IsAny<BoundStatement>()))
+                .Returns(TestHelper.DelayedTask(new RowSet(), 2000).ContinueWith(t =>
+                {
+                    rowsetReturned = true;
+                    return t.Result;
+                }))
+                .Verifiable();
+            sessionMock
+                .Setup(s => s.PrepareAsync(It.IsAny<string>()))
+                .Returns<string>(cql => TaskHelper.ToTask(GetPrepared(cql)))
+                .Verifiable();
+            var mappingClient = GetMappingClient(sessionMock);
+            //Execute
+            mappingClient.Insert(newUser);
+            Assert.True(rowsetReturned);
+            sessionMock.Verify();
+        }
+
+        [Test]
+        public void InsertIfNotExists_Poco_AppliedInfo_True_Test()
+        {
+            //Just a few props as it is just to test that it runs
+            var user = TestDataHelper.GetUserList().First();
+            var newUser = new InsertUser
+            {
+                Id = Guid.NewGuid(),
+                Name = user.Name
+            };
+            string query = null;
+            var sessionMock = new Mock<ISession>(MockBehavior.Strict);
+            sessionMock
+                .Setup(s => s.ExecuteAsync(It.IsAny<BoundStatement>()))
+                .Returns(TestHelper.DelayedTask(TestDataHelper.CreateMultipleValuesRowSet(new [] {"[applied]"}, new [] { true})))
+                .Callback<BoundStatement>(b => query = b.PreparedStatement.Cql)
+                .Verifiable();
+            sessionMock
+                .Setup(s => s.PrepareAsync(It.IsAny<string>()))
+                .Returns<string>(cql => TestHelper.DelayedTask(GetPrepared(cql)))
+                .Verifiable();
+            var mappingClient = GetMappingClient(sessionMock);
+            //Execute
+            var appliedInfo = mappingClient.InsertIfNotExists(newUser);
+            sessionMock.Verify();
+            StringAssert.StartsWith("INSERT INTO users (", query);
+            StringAssert.EndsWith(") IF NOT EXISTS", query);
+            Assert.True(appliedInfo.Applied);
+        }
+
+        [Test]
+        public void InsertIfNotExists_Poco_AppliedInfo_False_Test()
+        {
+            //Just a few props as it is just to test that it runs
+            var user = TestDataHelper.GetUserList().First();
+            var newUser = new InsertUser
+            {
+                Id = Guid.NewGuid(),
+                Name = user.Name
+            };
+            string query = null;
+            var sessionMock = new Mock<ISession>(MockBehavior.Strict);
+            sessionMock
+                .Setup(s => s.ExecuteAsync(It.IsAny<BoundStatement>()))
+                .Returns(TestHelper.DelayedTask(TestDataHelper.CreateMultipleValuesRowSet(new[] { "[applied]", "userid", "name" }, new object[] { false, newUser.Id, "existing-name"})))
+                .Callback<BoundStatement>(b => query = b.PreparedStatement.Cql)
+                .Verifiable();
+            sessionMock
+                .Setup(s => s.PrepareAsync(It.IsAny<string>()))
+                .Returns<string>(cql => TestHelper.DelayedTask(GetPrepared(cql)))
+                .Verifiable();
+            var mappingClient = GetMappingClient(sessionMock);
+            //Execute
+            var appliedInfo = mappingClient.InsertIfNotExists(newUser);
+            sessionMock.Verify();
+            StringAssert.StartsWith("INSERT INTO users (", query);
+            StringAssert.EndsWith(") IF NOT EXISTS", query);
+            Assert.False(appliedInfo.Applied);
+            Assert.AreEqual(newUser.Id, appliedInfo.Existing.Id);
+            Assert.AreEqual("existing-name", appliedInfo.Existing.Name);
         }
     }
 }

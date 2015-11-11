@@ -15,7 +15,9 @@
 //
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
+using Cassandra.Requests;
 
 namespace Cassandra
 {
@@ -27,6 +29,7 @@ namespace Cassandra
     {
         private string _query;
         private volatile RoutingKey _routingKey;
+        private object[] _routingValues;
 
         /// <summary>
         ///  Gets the query string.
@@ -37,37 +40,53 @@ namespace Cassandra
         }
 
         /// <summary>
-        ///  Gets the routing key for the query. <p> Note that unless the routing key has been
-        ///  explicitly set through <link>#setRoutingKey</link>, this will method will
-        ///  return <c>null</c> (to avoid having to parse the query string to
-        ///  retrieve the partition key).</p>
+        /// Gets the routing key for the query.
+        /// <para>
+        /// Routing key can be provided using the <see cref="SetRoutingValues"/> method.
+        /// </para>
         /// </summary>
         public override RoutingKey RoutingKey
         {
-            get { return _routingKey; }
+            get
+            {
+                if (_routingKey != null)
+                {
+                    return _routingKey;   
+                }
+                if (_routingValues == null)
+                {
+                    return null;
+                }
+                //Calculate the routing key
+                return RoutingKey.Compose(
+                    _routingValues
+                    .Select(key => new RoutingKey(TypeCodec.Encode(ProtocolVersion, key)))
+                    .ToArray());
+            }
         }
 
-        public SimpleStatement() : base(QueryProtocolOptions.Default)
+        public SimpleStatement()
         {
         }
 
         /// <summary>
         ///  Creates a new instance of <c>SimpleStatement</c> with the provided CQL query.
         /// </summary>
-        /// <param name="query"> the query string.</param>
+        /// <param name="query">The cql query string.</param>
         public SimpleStatement(string query)
-            : base(QueryProtocolOptions.Default)
         {
             _query = query;
         }
 
-        internal SimpleStatement(string query, QueryProtocolOptions queryProtocolOptions)
-            : base(queryProtocolOptions)
+        /// <summary>
+        ///  Creates a new instance of <c>SimpleStatement</c> with the provided CQL query and values provided.
+        /// </summary>
+        /// <param name="query">The cql query string</param>
+        /// <param name="values">Parameter values required for the execution of <c>query</c></param>
+        public SimpleStatement(string query, params object[] values) : this(query)
         {
-            _query = query;
-            SetConsistencyLevel(queryProtocolOptions.Consistency);
-            SetSerialConsistencyLevel(queryProtocolOptions.SerialConsistency);
-            SetPageSize(queryProtocolOptions.PageSize);
+            // ReSharper disable once DoNotCallOverridableMethodsInConstructor
+            SetValues(values);
         }
 
         /// <summary>
@@ -88,6 +107,17 @@ namespace Cassandra
             return this;
         }
 
+        /// <summary>
+        /// Sets the partition key values in order to route the query to the correct replicas.
+        /// <para>For simple partition keys, set the partition key value.</para>
+        /// <para>For composite partition keys, set the multiple the partition key values in correct order.</para>
+        /// </summary>
+        public SimpleStatement SetRoutingValues(params object[] keys)
+        {
+            _routingValues = keys;
+            return this;
+        }
+
         public SimpleStatement SetQueryString(string queryString)
         {
             _query = queryString;
@@ -104,7 +134,27 @@ namespace Cassandra
         /// using a single instance of an anonymous type, with property names as parameter names.
         /// </para>
         /// </summary>
+        [Obsolete("The method Bind() is deprecated, use SimpleStatement constructor parameters to provide query values")]
         public SimpleStatement Bind(params object[] values)
+        {
+            SetValues(values);
+            return this;
+        }
+
+        [Obsolete("The method BindObject() is deprecated, use SimpleStatement constructor parameters to provide query values")]
+        public SimpleStatement BindObjects(object[] values)
+        {
+            return Bind(values);
+        }
+
+        internal override IQueryRequest CreateBatchRequest(int protocolVersion)
+        {
+            //Uses the default query options as the individual options of the query will be ignored
+            var options = QueryProtocolOptions.CreateFromQuery(this, new QueryOptions());
+            return new QueryRequest(protocolVersion, QueryString, IsTracing, options);
+        }
+
+        internal override void SetValues(object[] values)
         {
             if (values != null && values.Length == 1 && Utils.IsAnonymousType(values[0]))
             {
@@ -113,19 +163,7 @@ namespace Cassandra
                 QueryValueNames = keyValues.Keys.Select(k => k.ToLowerInvariant()).ToList();
                 values = keyValues.Values.ToArray();
             }
-            SetValues(values);
-            return this;
-        }
-
-        public SimpleStatement BindObjects(object[] values)
-        {
-            return Bind(values);
-        }
-
-        internal override IQueryRequest CreateBatchRequest(int protocolVersion)
-        {
-            return new QueryRequest(protocolVersion, QueryString, IsTracing, QueryProtocolOptions.CreateFromQuery(this, Cassandra.ConsistencyLevel.Any));
-                // this Cassandra.ConsistencyLevel.Any is not used due fact that BATCH got own CL 
+            base.SetValues(values);
         }
     }
 }

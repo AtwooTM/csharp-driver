@@ -21,6 +21,7 @@ using System.Linq.Expressions;
 using System.Threading.Tasks;
 using Cassandra.Mapping;
 using Cassandra.Mapping.Statements;
+using Cassandra.Tasks;
 
 namespace Cassandra.Data.Linq
 {
@@ -56,6 +57,11 @@ namespace Cassandra.Data.Linq
             }
         }
 
+        internal StatementFactory StatementFactory
+        {
+            get { return _statementFactory; }
+        }
+
         public Expression Expression
         {
             get { return _expression; }
@@ -71,7 +77,7 @@ namespace Cassandra.Data.Linq
             PocoData = pocoData;
         }
 
-        protected abstract string GetCql(out object[] values);
+        protected internal abstract string GetCql(out object[] values);
 
         public void Execute()
         {
@@ -114,7 +120,7 @@ namespace Cassandra.Data.Linq
             object[] values;
             string query = GetCql(out values);
             SetQueryString(query);
-            BindObjects(values);
+            SetValues(values);
         }
 
         public ITable GetTable()

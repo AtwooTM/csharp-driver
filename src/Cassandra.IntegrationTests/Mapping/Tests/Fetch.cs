@@ -18,45 +18,41 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Cassandra.Data.Linq;
-using Cassandra.IntegrationTests.Linq.Tests;
 using Cassandra.IntegrationTests.Mapping.Structures;
 using Cassandra.IntegrationTests.TestBase;
 using Cassandra.IntegrationTests.TestClusterManagement;
 using Cassandra.Mapping;
 using Cassandra.Tests.Mapping.FluentMappings;
+using Cassandra.Tests.Mapping.Pocos;
 using NUnit.Framework;
 
 namespace Cassandra.IntegrationTests.Mapping.Tests
 {
     [Category("short")]
-    public class Fetch : TestGlobals
+    public class Fetch : SharedClusterTest
     {
-        ISession _session = null;
-        private readonly Logger _logger = new Logger(typeof(Fetch));
+        ISession _session;
         private string _uniqueKsName;
-        private ITestCluster _testCluster;
+
+        protected override void TestFixtureSetUp()
+        {
+            base.TestFixtureSetUp();
+            _session = Session;
+        }
 
         [SetUp]
-        public void SetupTest()
+        public void TestSetup()
         {
-            _testCluster = TestClusterManager.GetTestCluster(1);
-            _session = _testCluster.Session;
             _uniqueKsName = TestUtils.GetUniqueKeyspaceName();
             _session.CreateKeyspace(_uniqueKsName);
             _session.ChangeKeyspace(_uniqueKsName);
-        }
-
-        [TearDown]
-        public void TeardownTest()
-        {
-            _session.DeleteKeyspace(_uniqueKsName);
         }
 
         /// <summary>
         /// Successfully Fetch mapped records by passing in a static query string
         /// </summary>
         [Test]
-        public void Fetch_UsingString_Success()
+        public void Fetch_UsingSelectCqlString()
         {
             Table<Author> table = new Table<Author>(_session, new MappingConfiguration());
             table.Create();
@@ -76,37 +72,34 @@ namespace Cassandra.IntegrationTests.Mapping.Tests
         }
 
         /// <summary>
-        /// Successfully insert a new record into a table that was created with fluent mapping
+        /// Successfully Fetch mapped records by passing in a static query string
         /// </summary>
         [Test]
-        public void Fetch_NoArgDefaultsToSelectAll()
+        public void FetchAsync_Using_Select_Cql_And_PageSize()
         {
-            var config = new MappingConfiguration().Define(new ManyDataTypesPocoMappingCaseSensitive());
-            var table = new Table<ManyDataTypesPoco>(_session, config);
+            var table = new Table<Author>(_session, new MappingConfiguration());
             table.Create();
 
-            var mapper = new Mapper(_session, config);
-            List<ManyDataTypesPoco> manyTypesList = new List<ManyDataTypesPoco>();
-            for (int i = 0; i < 10; i++)
+            var mapper = new Mapper(_session, new MappingConfiguration().Define(new FluentUserMapping()));
+            var ids = new[] {Guid.NewGuid().ToString(), Guid.NewGuid().ToString()};
+
+            mapper.Insert(new Author { AuthorId = ids[0] });
+            mapper.Insert(new Author { AuthorId = ids[1] });
+
+            List<Author> authors = null;
+            mapper.FetchAsync<Author>(Cql.New("SELECT * from " + table.Name).WithOptions(o => o.SetPageSize(int.MaxValue))).ContinueWith(t =>
             {
-                manyTypesList.Add(ManyDataTypesPoco.GetRandomInstance());
-            }
-            foreach (var manyTypesRecord in manyTypesList)
-                mapper.Insert(manyTypesRecord);
-
-            List<ManyDataTypesPoco> instancesRetrieved = mapper.Fetch<ManyDataTypesPoco>().ToList();
-            Assert.AreEqual(manyTypesList.Count, instancesRetrieved.Count);
-
-            foreach (var instanceRetrieved in instancesRetrieved)
-                ManyDataTypesPoco.AssertListContains(manyTypesList, instanceRetrieved);
+                authors = t.Result.ToList();
+            }).Wait();
+            Assert.AreEqual(2, authors.Count);;
+            CollectionAssert.AreEquivalent(ids, authors.Select(a => a.AuthorId));
         }
-
 
         /// <summary>
         /// Successfully Fetch mapped records by passing in a Cql Object
         /// </summary>
         [Test]
-        public void Fetch_UsingCqlObject_Success()
+        public void Fetch_UsingCqlObject()
         {
             Table<Author> table = new Table<Author>(_session, new MappingConfiguration());
             table.Create();
@@ -121,6 +114,90 @@ namespace Cassandra.IntegrationTests.Mapping.Tests
             List<Author> actualAuthors = mapper.Fetch<Author>(cql).ToList();
             Assert.AreEqual(totalInserts, actualAuthors.Count);
             Author.AssertListsContainTheSame(expectedAuthors, actualAuthors);
+        }
+
+        /// <summary>
+        /// Successfully Fetch mapped records by passing in a Cql Object, 
+        /// using all available acceptable consistency levels
+        /// </summary>
+        [Test]
+        public void Fetch_WithConsistencyLevel_Valids()
+        {
+            Table<Author> table = new Table<Author>(_session, new MappingConfiguration());
+            table.Create();
+            int totalInserts = 10;
+
+            var mapper = new Mapper(_session, new MappingConfiguration().Define(new FluentUserMapping()));
+            List<Author> expectedAuthors = Author.GetRandomList(totalInserts);
+            foreach (Author expectedAuthor in expectedAuthors)
+                mapper.Insert(expectedAuthor);
+
+            var consistencyLevels = new[]
+            {
+                ConsistencyLevel.All,
+                ConsistencyLevel.LocalOne,
+                ConsistencyLevel.LocalQuorum,
+                ConsistencyLevel.Quorum,
+                ConsistencyLevel.One,
+            };
+            foreach (var consistencyLevel in consistencyLevels)
+            {
+                Cql cql = new Cql("SELECT * from " + table.Name).WithOptions(c => c.SetConsistencyLevel(consistencyLevel));
+                List<Author> actualAuthors = mapper.Fetch<Author>(cql).ToList();
+                Assert.AreEqual(totalInserts, actualAuthors.Count);
+                Author.AssertListsContainTheSame(expectedAuthors, actualAuthors);
+            }
+        }
+
+        /// <summary>
+        /// Attempte to Fetch mapped records by passing in a Cql Object, 
+        /// using consistency levels that are only valid for writes
+        /// </summary>
+        [Test]
+        public void Fetch_WithConsistencyLevel_Invalids_OnlySupportedForWrites()
+        {
+            Table<Author> table = new Table<Author>(_session, new MappingConfiguration());
+            table.Create();
+            int totalInserts = 10;
+
+            var mapper = new Mapper(_session, new MappingConfiguration().Define(new FluentUserMapping()));
+            List<Author> expectedAuthors = Author.GetRandomList(totalInserts);
+            foreach (Author expectedAuthor in expectedAuthors)
+                mapper.Insert(expectedAuthor);
+
+            Cql cql = new Cql("SELECT * from " + table.Name).WithOptions(c => c.SetConsistencyLevel(ConsistencyLevel.EachQuorum));
+            var err = Assert.Throws<InvalidQueryException>(() => mapper.Fetch<Author>(cql).ToList());
+            Assert.AreEqual("EACH_QUORUM ConsistencyLevel is only supported for writes", err.Message);
+
+            cql = new Cql("SELECT * from " + table.Name).WithOptions(c => c.SetConsistencyLevel(ConsistencyLevel.Any));
+            err = Assert.Throws<InvalidQueryException>(() => mapper.Fetch<Author>(cql).ToList());
+            Assert.AreEqual("ANY ConsistencyLevel is only supported for writes", err.Message);
+        }
+
+        /// <summary>
+        /// Successfully Fetch mapped records by passing in a Cql Object, 
+        /// with consistency level set larger than available node count.
+        /// Assert expected failure message.
+        /// </summary>
+        [Test]
+        public void Fetch_WithConsistencyLevel_Invalids_NotEnoughReplicas()
+        {
+            Table<Author> table = new Table<Author>(_session, new MappingConfiguration());
+            table.Create();
+            int totalInserts = 10;
+
+            var mapper = new Mapper(_session, new MappingConfiguration().Define(new FluentUserMapping()));
+            List<Author> expectedAuthors = Author.GetRandomList(totalInserts);
+            foreach (Author expectedAuthor in expectedAuthors)
+                mapper.Insert(expectedAuthor);
+
+            Cql cql = new Cql("SELECT * from " + table.Name).WithOptions(c => c.SetConsistencyLevel(ConsistencyLevel.Two));
+            var err = Assert.Throws<UnavailableException>(() => mapper.Fetch<Author>(cql));
+            Assert.AreEqual("Not enough replicas available for query at consistency Two (2 required but only 1 alive)", err.Message);
+
+            cql = new Cql("SELECT * from " + table.Name).WithOptions(c => c.SetConsistencyLevel(ConsistencyLevel.Three));
+            err = Assert.Throws<UnavailableException>(() => mapper.Fetch<Author>(cql));
+            Assert.AreEqual("Not enough replicas available for query at consistency Three (3 required but only 1 alive)", err.Message);
         }
 
         /// <summary>
@@ -165,7 +242,14 @@ namespace Cassandra.IntegrationTests.Mapping.Tests
             foreach (Author expectedAuthor in expectedAuthors)
                 mapper.Insert(expectedAuthor);
 
-            Cql cql = new Cql("SELECT * from " + table.Name);
+            // wait until all records are available to be fetched: 
+            List<Author> authors = mapper.Fetch<Author>("SELECT * from " + table.Name).ToList();
+            DateTime futureDateTime = DateTime.Now.AddSeconds(10);
+            while (authors.Count < expectedAuthors.Count && DateTime.Now < futureDateTime)
+                authors = mapper.Fetch<Author>("SELECT * from " + table.Name).ToList();
+            Assert.AreEqual(expectedAuthors.Count, authors.Count, "Setup FAIL: Less than expected number of authors uploaded");
+
+            Cql cql = new Cql("SELECT * from " + table.Name).WithOptions(o => o.SetConsistencyLevel(ConsistencyLevel.Quorum));
             List<Author> authorsFetchedAndSaved = new List<Author>();
             var authorsFetched = mapper.Fetch<Author>(cql).GetEnumerator();
             while (authorsFetched.MoveNext())
@@ -178,8 +262,80 @@ namespace Cassandra.IntegrationTests.Mapping.Tests
             }
         }
 
+        /// <summary>
+        /// Page through results from a mapped FetchPage request
+        /// 
+        /// @Jira CSHARP-262 https://datastax-oss.atlassian.net/browse/CSHARP-262
+        /// </summary>
         [Test]
-        [TestCassandraVersion(2, 1)]
+        public void FetchPage_Manual_Explicit()
+        {
+            const int totalLength = 100;
+            Table<Author> table = new Table<Author>(_session, new MappingConfiguration());
+            table.Create();
+
+            var mapper = new Mapper(_session, new MappingConfiguration().Define(new FluentUserMapping()));
+            List<Author> expectedAuthors = Author.GetRandomList(totalLength);
+            foreach (Author expectedAuthor in expectedAuthors)
+            {
+                mapper.Insert(expectedAuthor);
+            }
+
+            var ids = new HashSet<string>();
+            byte[] pagingState = null;
+            var safeCounter = 0;
+            do
+            {
+                IPage<Author> authors = mapper.FetchPage<Author>(10, pagingState, "SELECT * from " + table.Name);
+                foreach (var a in authors)
+                {
+                    ids.Add(a.AuthorId);
+                }
+                pagingState = authors.PagingState;
+            } while (pagingState != null && safeCounter++ < 100);
+
+            Assert.AreEqual(totalLength, ids.Count);
+        }
+
+        /// <summary>
+        /// Page through results from a mapped FetchPage with query options
+        /// 
+        /// @Jira CSHARP-262 https://datastax-oss.atlassian.net/browse/CSHARP-262
+        /// </summary>
+        [Test]
+        public void FetchPage_Manual_WithQueryOptions()
+        {
+            const int totalLength = 100;
+            const int pageSize = 10;
+            Table<Author> table = new Table<Author>(_session, new MappingConfiguration());
+            table.Create();
+
+            var mapper = new Mapper(_session, new MappingConfiguration().Define(new FluentUserMapping()));
+            List<Author> expectedAuthors = Author.GetRandomList(totalLength);
+            foreach (Author expectedAuthor in expectedAuthors)
+            {
+                mapper.Insert(expectedAuthor);
+            }
+
+            var ids = new HashSet<string>();
+            byte[] pagingState = null;
+            var safeCounter = 0;
+            do
+            {
+                var state = pagingState;
+                IPage<Author> authors = mapper.FetchPage<Author>(Cql.New("SELECT * from " + table.Name).WithOptions(opt => opt.SetPageSize(pageSize).SetPagingState(state)));
+                foreach (var a in authors)
+                {
+                    ids.Add(a.AuthorId);
+                }
+                Assert.LessOrEqual(authors.Count, pageSize);
+                pagingState = authors.PagingState;
+            } while (pagingState != null && safeCounter++ < 100);
+
+            Assert.AreEqual(totalLength, ids.Count);
+        }
+
+        [Test, TestCassandraVersion(2, 1, 0)]
         public void Fetch_With_Udt()
         {
             var mapper = new Mapper(_session, new MappingConfiguration());
@@ -195,6 +351,27 @@ namespace Cassandra.IntegrationTests.Mapping.Tests
             var song = album.Songs[0];
             Assert.AreEqual("Bob Marley", song.Artist);
             Assert.AreEqual("Africa Unite", song.Title);
+        }
+
+        [Test]
+        public void Fetch_Struct_Value_Should_Default()
+        {
+            _session.Execute("CREATE TABLE tbl_with_structs (id uuid primary key, bool_sample boolean, timestamp_sample timestamp)");
+            var map = new Map<AllTypesEntity>()
+                .Column(p => p.BooleanValue, c => c.WithName("bool_sample"))
+                .Column(p => p.UuidValue, c => c.WithName("id"))
+                .PartitionKey(p => p.UuidValue)
+                .ExplicitColumns();
+            var id = Guid.NewGuid();
+            var query = string.Format("INSERT INTO tbl_with_structs (id, bool_sample, timestamp_sample) VALUES ({0}, null, null)", id);
+            _session.Execute(query);
+            var mapper = new Mapper(_session, new MappingConfiguration().Define(map));
+            // ReSharper disable once ReturnValueOfPureMethodIsNotUsed
+            var row = mapper.Fetch<AllTypesEntity>("SELECT * FROM tbl_with_structs WHERE id = ?", id).First();
+            Assert.NotNull(row);
+            Assert.AreEqual(row.UuidValue, id);
+            Assert.AreEqual(row.BooleanValue, default(bool));
+            Assert.AreEqual(row.DateTimeValue, default(DateTime));
         }
     }
 }

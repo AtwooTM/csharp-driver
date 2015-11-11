@@ -15,21 +15,27 @@
 //
 
 using System;
+using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Net;
 using System.Linq;
+using Cassandra.Collections;
 
 namespace Cassandra
 {
     internal class Hosts : IEnumerable<Host>
     {
-        private readonly ConcurrentDictionary<IPEndPoint, Host> _hosts = new ConcurrentDictionary<IPEndPoint, Host>();
+        private readonly CopyOnWriteDictionary<IPEndPoint, Host> _hosts = new CopyOnWriteDictionary<IPEndPoint, Host>();
         private readonly IReconnectionPolicy _rp;
         /// <summary>
-        /// Event that gets triggered when a new host has been added
+        /// Event that gets triggered when a host is considered as DOWN (not available)
         /// </summary>
-        internal event Action<Host, DateTimeOffset> Down;
+        internal event Action<Host, long> Down;
+        /// <summary>
+        /// Event that gets triggered when a host is considered back UP (available for queries)
+        /// </summary>
+        internal event Action<Host> Up;
         /// <summary>
         /// Event that gets triggered when a new host has been added to the pool
         /// </summary>
@@ -38,6 +44,14 @@ namespace Cassandra
         /// Event that gets triggered when a host has been removed
         /// </summary>
         internal event Action<Host> Removed;
+
+        /// <summary>
+        /// Gets the total amount of hosts in the cluster
+        /// </summary>
+        internal int Count
+        {
+            get { return _hosts.Count; }
+        }
 
         public Hosts(IReconnectionPolicy rp)
         {
@@ -61,50 +75,67 @@ namespace Cassandra
         {
             var newHost = new Host(key, _rp);
             var host = _hosts.GetOrAdd(key, newHost);
-            if (Object.ReferenceEquals(newHost, host) && Added != null)
+            if (!ReferenceEquals(newHost, host))
             {
-                //The node was added and there is an event handler
-                //Fire the event
+                //The host was not added, return the existing host
+                return host;
+            }
+            //The node was added
+            host.Down += OnHostDown;
+            host.Up += OnHostUp;
+            if (Added != null)
+            {
                 Added(newHost);
             }
             return host;
         }
 
-        private void OnHostDown(Host h, DateTimeOffset nextUpTime)
+        private void OnHostDown(Host sender, long reconnectionDelay)
         {
             if (Down != null)
             {
-                Down(h, nextUpTime);
+                Down(sender, reconnectionDelay);
             }
         }
 
-        public bool SetDownIfExists(IPEndPoint ep)
+        private void OnHostUp(Host sender)
+        {
+            if (Up != null)
+            {
+                Up(sender);
+            }
+        }
+
+        public void SetDownIfExists(IPEndPoint ep)
         {
             Host host;
-            if (_hosts.TryGetValue(ep, out host))
+            if (!_hosts.TryGetValue(ep, out host))
             {
-                return host.SetDown();
+                return;
             }
-            return false;
+            host.SetDown();
         }
 
         public void RemoveIfExists(IPEndPoint ep)
         {
             Host host;
-            if (_hosts.TryRemove(ep, out host))
+            if (!_hosts.TryRemove(ep, out host))
             {
-                host.SetDown();
-                host.Down -= OnHostDown;
-                if (Removed != null)
-                {
-                    Removed(host);
-                }
+                //The host does not exists
+                return;
+            }
+            host.SetDown();
+            host.Down -= OnHostDown;
+            host.Up -= OnHostUp;
+            if (Removed != null)
+            {
+                Removed(host);
             }
         }
 
         public IEnumerable<IPEndPoint> AllEndPointsToCollection()
         {
-            return new List<IPEndPoint>(_hosts.Keys);
+            return _hosts.Keys;
         }
 
         public IEnumerator<Host> GetEnumerator()
@@ -112,7 +143,7 @@ namespace Cassandra
             return _hosts.Values.GetEnumerator();
         }
 
-        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator()
+        IEnumerator IEnumerable.GetEnumerator()
         {
             return _hosts.Values.GetEnumerator();
         }

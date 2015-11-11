@@ -20,20 +20,47 @@ using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+// ReSharper disable DoNotCallOverridableMethodsInConstructor
+// ReSharper disable CheckNamespace
 
 namespace Cassandra
 {
     /// <summary>
     /// Represents a result of a query returned by Cassandra.
+    /// <para>
+    /// The retrieval of the rows of a RowSet is generally paged (a first page
+    /// of result is fetched and the next one is only fetched once all the results
+    /// of the first one has been consumed). The size of the pages can be configured
+    /// either globally through <see cref="QueryOptions.SetPageSize(int)"/> or per-statement
+    /// with <see cref="IStatement.SetPageSize(int)"/>. Though new pages are automatically
+    /// (and transparently) fetched when needed, it is possible to force the retrieval
+    /// of the next page early through <see cref="FetchMoreResults()"/>.
+    /// </para>
+    /// <para>
+    /// The RowSet dequeues <see cref="Row"/> items while iterated. Parallel enumerations 
+    /// is supported and thread-safe. After a full enumeration of this instance, following
+    /// enumerations will be empty, as all rows have been dequeued.
+    /// </para>
     /// </summary>
+    /// <remarks>
+    /// RowSet paging is not available with the version 1 of the native protocol. 
+    /// If the protocol version 1 is in use, a RowSet is always fetched in it's entirely and
+    /// it's up to the client to make sure that no query can yield ResultSet that won't hold
+    /// in memory.
+    /// </remarks>
     public class RowSet : IEnumerable<Row>, IDisposable
     {
-        private object _pageLock = new object();
+        private readonly object _pageLock = new object();
+        // ReSharper disable once InconsistentNaming
         /// <summary>
         /// Contains the PagingState keys of the pages already retrieved.
         /// </summary>
         protected ConcurrentDictionary<byte[], bool> _pagers = new ConcurrentDictionary<byte[], bool>();
 
+        /// <summary>
+        /// Determines if when dequeuing, it will automatically fetch the following result pages.
+        /// </summary>
+        protected internal bool AutoPage { get; set; }
         /// <summary>
         /// Delegate that is called to get the next page.
         /// </summary>
@@ -55,12 +82,12 @@ namespace Cassandra
         public virtual ExecutionInfo Info { get; set; }
 
         /// <summary>
-        /// Gets or sets the columns in the rowset
+        /// Gets or sets the columns in the RowSet
         /// </summary>
         public virtual CqlColumn[] Columns { get; set; }
 
         /// <summary>
-        /// Gets or sets the paging state of the query for the rowset.
+        /// Gets or sets the paging state of the query for the RowSet.
         /// When set it states that there are more pages.
         /// </summary>
         public virtual byte[] PagingState { get; set; }
@@ -76,7 +103,6 @@ namespace Cassandra
                 return false;
             }
             PageNext();
-
             return RowQueue.Count == 0;
         }
 
@@ -87,7 +113,7 @@ namespace Cassandra
         { 
             get
             {
-                return this.PagingState == null;
+                return PagingState == null || !AutoPage;
             } 
         }
 
@@ -96,6 +122,7 @@ namespace Cassandra
             RowQueue = new ConcurrentQueue<Row>();
             Info = new ExecutionInfo();
             Columns = new CqlColumn[] { };
+            AutoPage = true;
         }
 
         /// <summary>
@@ -119,7 +146,7 @@ namespace Cassandra
         /// </summary>
         public Task FetchMoreResultsAsync()
         {
-            return Task.Factory.StartNew(() => FetchMoreResults());
+            return Task.Factory.StartNew(FetchMoreResults);
         }
 
         /// <summary>
@@ -136,15 +163,15 @@ namespace Cassandra
         /// <returns></returns>
         public IEnumerable<Row> GetRows()
         {
-            //legacy: Keep the GetRows method for Compatibity.
+            //legacy: Keep the GetRows method for Compatibility.
             return this;
         }
 
-        public IEnumerator<Row> GetEnumerator()
+        public virtual IEnumerator<Row> GetEnumerator()
         {
             while (!IsExhausted())
             {
-                Row row = null;
+                Row row;
                 while (RowQueue.TryDequeue(out row))
                 {
                     yield return row;
@@ -158,7 +185,7 @@ namespace Cassandra
         }
 
         /// <summary>
-        /// Gets the next results and add the rows to the current rowset queue
+        /// Gets the next results and add the rows to the current RowSet queue
         /// </summary>
         protected virtual void PageNext()
         {
@@ -181,21 +208,22 @@ namespace Cassandra
                 }
                 bool value;
                 bool alreadyPresent = _pagers.TryGetValue(pageState, out value);
-                if (!alreadyPresent)
+                if (alreadyPresent)
                 {
-                    var rs = FetchNextPage(pageState);
-                    foreach (var newRow in rs.RowQueue)
-                    {
-                        this.RowQueue.Enqueue(newRow);
-                    }
-                    this.PagingState = rs.PagingState;
-                    _pagers.AddOrUpdate(pageState, true, (k, v) => v);
+                    return;
                 }
+                var rs = FetchNextPage(pageState);
+                foreach (var newRow in rs.RowQueue)
+                {
+                    RowQueue.Enqueue(newRow);
+                }
+                PagingState = rs.PagingState;
+                _pagers.AddOrUpdate(pageState, true, (k, v) => v);
             }
         }
 
         /// <summary>
-        /// For backward compatibity only
+        /// For backward compatibility only
         /// </summary>
         [Obsolete("Explicitly releasing the RowSet resources is not required. It will be removed in future versions.", false)]
         public void Dispose()

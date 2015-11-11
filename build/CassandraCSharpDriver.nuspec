@@ -9,20 +9,21 @@
         <licenseUrl>http://www.apache.org/licenses/LICENSE-2.0</licenseUrl>
         <projectUrl>https://github.com/datastax/csharp-driver</projectUrl>
         <requireLicenseAcceptance>true</requireLicenseAcceptance>
-        <description>A C# client driver for Apache Cassandra. This driver works exclusively with the Cassandra Query Language version 3 (CQL3) and the CQL Native Protocol available from Cassandra 1.2.</description>
+        <summary>A modern, feature-rich and highly tunable C# client library for Apache Cassandra</summary>
+        <description>
+          A modern, feature-rich and highly tunable C# client library for Apache Cassandra (1.2+) and DataStax Enterprise (3.1+) using exclusively Cassandra&#39;s binary protocol and Cassandra Query Language v3.
+          Features: Sync and Async API; Simple, Prepared and Batch statements; Asynchronous IO, parallel execution, request pipelining; Connection pooling; Auto node discovery.
+          Works with any Cassandra cluster size.
+        </description>
         <releaseNotes />
-        <copyright>Copyright (C) 2014 DataStax Inc.</copyright>
-        <tags>cassandra apache datastax driver database nosql</tags>
+        <copyright>Copyright (C) 2015 DataStax Inc.</copyright>
+        <tags>cassandra apache datastax driver database nosql dotnet</tags>
         <dependencies>
-            <dependency id="lz4net" version="1.0.3.93" />
+            <dependency id="lz4net" version="1.0.5.93" />
         </dependencies>
     </metadata>
     <files>
         <file src="Cassandra\bin\Release\Cassandra.dll" target="lib\net40\Cassandra.dll "/>
         <file src="Cassandra\bin\Release\Cassandra.xml" target="lib\net40\Cassandra.xml "/>
-        <file src="Cassandra.Data\bin\Release\Cassandra.Data.dll" target="lib\net40\Cassandra.Data.dll "/>
-        <file src="Cassandra.Data\bin\Release\Cassandra.Data.xml" target="lib\net40\Cassandra.Data.xml "/>
-        <file src="Cassandra.Data.Linq\bin\Release\Cassandra.Data.Linq.dll" target="lib\net40\Cassandra.Data.Linq.dll "/>
-        <file src="Cassandra.Data.Linq\bin\Release\Cassandra.Data.Linq.xml" target="lib\net40\Cassandra.Data.Linq.xml "/>
     </files>
 </package>

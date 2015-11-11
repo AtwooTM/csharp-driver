@@ -17,6 +17,7 @@
 using System;
 using System.Collections;
 using System.Configuration;
+using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
 using System.Threading;
@@ -29,44 +30,25 @@ namespace Cassandra.IntegrationTests.TestBase
 {
     public class TestGlobals
     {
-        private static readonly Logger Logger = new Logger(typeof(TestGlobals));
-
-        public const int DefaultMaxClusterCmdRetries = 2;
+        public const int DefaultCassandraPort = 9042;
+        public const int DefaultMaxClusterCreateRetries = 2;
         public const string DefaultLocalIpPrefix = "127.0.0.";
         public const string DefaultInitialContactPoint = DefaultLocalIpPrefix + "1";
         public const int ClusterInitSleepMsPerIteration = 500;
         public const int ClusterInitSleepMsMax = 60 * 1000;
-        // Make current default test cluster name unique
-        public const string DefaultKeyspaceName = "test_cluster_keyspace";
 
         private static TestClusterManager _clusterManager;
         private static bool _clusterManagerIsInitializing;
         private static bool _clusterManagerIsInitalized;
 
-        [Option('c', "cassandra-version",
-            HelpText = "CCM Cassandra Version.", DefaultValue = "2.1.0" )]
-        public string CassandraVersionStr { get; set; }
+        public string CassandraVersionStr 
+        {
+            get { return TestClusterManager.CassandraVersionText; }
+        }
 
         public Version CassandraVersion
         {
-            get
-            {
-                int mayor = 0, minor = 0, build = 0;
-                if (this.CassandraVersionStr != null)
-                {
-                    var versionParts = this.CassandraVersionStr.Split('.');
-                    if (versionParts.Length >= 2)
-                    {
-                        mayor = Convert.ToInt32(versionParts[0]);
-                        minor = Convert.ToInt32(versionParts[1]);
-                        if (versionParts.Length == 3)
-                        {
-                            int.TryParse(versionParts[2], out build);
-                        }
-                    }
-                }
-                return new Version(mayor, minor, build);
-            }
+            get { return TestClusterManager.CassandraVersion; }
         }
 
         [Option("use-ctool",
@@ -114,8 +96,6 @@ namespace Cassandra.IntegrationTests.TestBase
         {
             if (ConfigurationManager.AppSettings.Count > 0)
             {
-                //Load the values from configuration
-                CassandraVersionStr = ConfigurationManager.AppSettings["CassandraVersion"] ?? CassandraVersionStr;
                 DefaultIpPrefix = ConfigurationManager.AppSettings["DefaultIpPrefix"] ?? this.DefaultIpPrefix;
                 LogLevel = ConfigurationManager.AppSettings["LogLevel"] ?? this.LogLevel;
 
@@ -129,10 +109,6 @@ namespace Cassandra.IntegrationTests.TestBase
                     SSHPort = Convert.ToInt32(ConfigurationManager.AppSettings["SSHPort"]);
 
                 SSHUser = ConfigurationManager.AppSettings["SSHUser"] ?? this.SSHUser;
-
-                bool useCtoolParsed;
-                Boolean.TryParse(ConfigurationManager.AppSettings["UseCtool"], out useCtoolParsed);
-                UseCtool = useCtoolParsed;
             }
 
         }
@@ -155,7 +131,7 @@ namespace Cassandra.IntegrationTests.TestBase
                     while (_clusterManagerIsInitializing)
                     {
                         int SleepMs = 1000;
-                        Logger.Info("Shared " + _clusterManagerIsInitializing.GetType().Name + " object is initializing. Sleeping " + SleepMs + " MS ... ");
+                        Trace.TraceInformation("Shared " + _clusterManagerIsInitializing.GetType().Name + " object is initializing. Sleeping " + SleepMs + " MS ... ");
                         Thread.Sleep(SleepMs);
                     }
                 }
@@ -171,7 +147,7 @@ namespace Cassandra.IntegrationTests.TestBase
         }
 
         [SetUp]
-        public void TestSetup()
+        public void IndividualTestSetup()
         {
             VerifyAppropriateCassVersion();
             VerifyLocalCcmOnly();
@@ -184,7 +160,6 @@ namespace Cassandra.IntegrationTests.TestBase
             {
                 Assert.Ignore("Test Ignored: Requires CCM and tests are currently running using CTool");
             }
-
         }
 
         // If any test is designed for another C* version, mark it as ignored
@@ -198,7 +173,14 @@ namespace Cassandra.IntegrationTests.TestBase
             {
                 return;
             }
-            var methodAttr = type.GetMethod(test.Name)
+            var testName = test.Name;
+            if (testName.IndexOf('(') > 0)
+            {
+                //The test name could be a TestCase: NameOfTheTest(ParameterValue);
+                //Remove the parenthesis
+                testName = testName.Substring(0, testName.IndexOf('('));
+            }
+            var methodAttr = type.GetMethod(testName)
                 .GetCustomAttributes(true)
                 .Select(a => (Attribute)a)
                 .FirstOrDefault((a) => a is TestCassandraVersion);
@@ -215,14 +197,14 @@ namespace Cassandra.IntegrationTests.TestBase
             var versionAttr = (TestCassandraVersion)attr;
             var executingVersion = CassandraVersion;
             if (!VersionMatch(versionAttr, executingVersion))
-                Assert.Ignore(String.Format("Test Ignored: Test suitable to be run against Cassandra {0}.{1} {2}", versionAttr.Major, versionAttr.Minor, versionAttr.Comparison >= 0 ? "or above" : "or below"));
+                Assert.Ignore(String.Format("Test Ignored: Test suitable to be run against Cassandra {0}.{1}.{2} {3}", versionAttr.Major, versionAttr.Minor, versionAttr.Build, versionAttr.Comparison >= 0 ? "or above" : "or below"));
         }
 
-        protected bool VersionMatch(TestCassandraVersion versionAttr, Version executingVersion)
+        public static bool VersionMatch(TestCassandraVersion versionAttr, Version executingVersion)
         {
             //Compare them as integers
-            var expectedVersion = versionAttr.Major * 10000 + versionAttr.Minor;
-            var actualVersion = executingVersion.Major * 10000 + executingVersion.Minor;
+            var expectedVersion = versionAttr.Major * 100000000 + versionAttr.Minor * 10000 + versionAttr.Build;
+            var actualVersion = executingVersion.Major * 100000000 + executingVersion.Minor * 10000 + executingVersion.Build;
             var comparison = (Comparison)actualVersion.CompareTo(expectedVersion);
 
             if (comparison >= Comparison.Equal && versionAttr.Comparison == Comparison.GreaterThanOrEqualsTo)

@@ -14,6 +14,7 @@
 //   limitations under the License.
 //
 
+using System.Diagnostics;
 using System.Security;
 using System.Security.Permissions;
 using Cassandra.IntegrationTests.TestBase;
@@ -24,13 +25,14 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Threading;
+using Cassandra.Tests;
 
 namespace Cassandra.IntegrationTests.Core
 {
     [TestFixture, Category("long")]
     public class ExceptionsTests : TestGlobals
     {
-        private readonly Logger _logger = new Logger(typeof(ExceptionsTests));
+        private static string _lastKnownInitialContactPoint;
 
         /// <summary>
         ///  Tests the AlreadyExistsException. Create a keyspace twice and a table twice.
@@ -39,7 +41,7 @@ namespace Cassandra.IntegrationTests.Core
         [Test]
         public void AlreadyExistsException()
         {
-            ITestCluster testCluster = TestClusterManager.GetTestCluster(1);
+            ITestCluster testCluster = TestClusterManager.GetNonShareableTestCluster(1);
             ISession session = testCluster.Session;
             
             string keyspace = TestUtils.GetUniqueKeyspaceName();
@@ -79,49 +81,6 @@ namespace Cassandra.IntegrationTests.Core
         }
 
         /// <summary>
-        ///  Tests DriverInternalError. Tests basic message, rethrow, and copy abilities.
-        /// </summary>
-        [Test]
-        public void DriverInternalError()
-        {
-            var errorMessage = "Test Message";
-
-            try
-            {
-                throw new DriverInternalError(errorMessage);
-            }
-            catch (DriverInternalError e1)
-            {
-                try
-                {
-                    throw new DriverInternalError("", e1);
-                }
-                catch (DriverInternalError e2)
-                {
-                    Assert.AreEqual(e2.InnerException.Message, errorMessage);
-                }
-            }
-        }
-
-        /// <summary>
-        ///  Tests InvalidConfigurationInQueryException. Tests basic message abilities.
-        /// </summary>
-        [Test]
-        public void InvalidConfigurationInQueryException()
-        {
-            var errorMessage = "Test Message";
-
-            try
-            {
-                throw new InvalidConfigurationInQueryException(errorMessage);
-            }
-            catch (InvalidConfigurationInQueryException e)
-            {
-                Assert.AreEqual(e.Message, errorMessage);
-            }
-        }
-
-        /// <summary>
         ///  Tests the NoHostAvailableException. by attempting to build a cluster using
         ///  the IP address "255.255.255.255" and test all available exception methods.
         /// </summary>
@@ -134,7 +93,7 @@ namespace Cassandra.IntegrationTests.Core
 
             try
             {
-                var cluster = Cluster.Builder().AddContactPoint(ipAddress).Build();
+                Cluster.Builder().AddContactPoint(ipAddress).Build();
             }
             catch (NoHostAvailableException e)
             {
@@ -267,11 +226,9 @@ namespace Cassandra.IntegrationTests.Core
             string tableName = "TestTable_" + Randomm.RandomAlphaNum(10);
             int replicationFactor = 2;
             string key = "1";
-
-            session.WaitForSchemaAgreement(
-                session.Execute(String.Format(TestUtils.CreateKeyspaceSimpleFormat, keyspaceName, replicationFactor)));
+            session.Execute(String.Format(TestUtils.CreateKeyspaceSimpleFormat, keyspaceName, replicationFactor));
             session.ChangeKeyspace(keyspaceName);
-            session.WaitForSchemaAgreement(session.Execute(String.Format(TestUtils.CreateTableSimpleFormat, tableName)));
+            session.Execute(String.Format(TestUtils.CreateTableSimpleFormat, tableName));
 
             session.Execute(
                 new SimpleStatement(String.Format(TestUtils.INSERT_FORMAT, tableName, key, "foo", 42, 24.03f)).SetConsistencyLevel(ConsistencyLevel.All));
@@ -300,10 +257,10 @@ namespace Cassandra.IntegrationTests.Core
                 catch (ReadTimeoutException e)
                 {
                     Assert.AreEqual(e.ConsistencyLevel, ConsistencyLevel.All);
-                    _logger.Info("We caught a ReadTimeoutException as expected, extending the total time to wait ... ");
+                    Trace.TraceInformation("We caught a ReadTimeoutException as expected, extending the total time to wait ... ");
                     readTimeoutWasCaught++;
                 }
-                _logger.Info("Expected exception was not thrown, trying again ... ");
+                Trace.TraceInformation("Expected exception was not thrown, trying again ... ");
             }
 
             Assert.True(expectedExceptionWasCaught,
@@ -326,11 +283,9 @@ namespace Cassandra.IntegrationTests.Core
             int replicationFactor = 2;
             string key = "1";
 
-            session.WaitForSchemaAgreement(
-                session.Execute(String.Format(TestUtils.CreateKeyspaceSimpleFormat, keyspace, replicationFactor)));
+            session.Execute(String.Format(TestUtils.CreateKeyspaceSimpleFormat, keyspace, replicationFactor));
             session.ChangeKeyspace(keyspace);
-            session.WaitForSchemaAgreement(
-                session.Execute(String.Format(TestUtils.CreateTableSimpleFormat, table)));
+                session.Execute(String.Format(TestUtils.CreateTableSimpleFormat, table));
 
             session.Execute(
                 new SimpleStatement(
@@ -353,27 +308,36 @@ namespace Cassandra.IntegrationTests.Core
             }
         }
 
-        [Test, Category(TestCategories.CcmOnly)]
+        [Test]
         public void PreserveStackTraceTest()
         {
             // we need to make sure at least a single node cluster is available, running locally
-            ITestCluster testCluster = TestClusterManager.GetTestCluster(1);
-            PreserveStackTraceAssertions();
+            var session = TestClusterManager.GetNonShareableTestCluster(1).Session;
+            try // writing without delegate assertion since that is undependable for this use case
+            {
+                session.Execute("SELECT WILL FAIL");
+                Assert.Fail("Expected Exception was not thrown!");
+            }
+            catch (SyntaxError ex) 
+            {
+                Assert.True(ex.StackTrace.Contains("PreserveStackTraceTest"));
+                Assert.True(ex.StackTrace.Contains("ExceptionsTests"));
+            }
         }
 
-        [Test, Category(TestCategories.CcmOnly)]
+        [Test]
         public void ExceptionsOnPartialTrust()
         {
             // we need to make sure at least a single node cluster is available, running locally
-            ITestCluster testCluster = TestClusterManager.GetTestCluster(1);
+            _lastKnownInitialContactPoint = TestClusterManager.GetNonShareableTestCluster(1).InitialContactPoint;
             var appDomain = CreatePartialTrustDomain();
-            appDomain.DoCallBack(PreserveStackTraceAssertions);
+            appDomain.DoCallBack(PreserveStackTraceOnConnectAndAssert);
         }
 
         [Test]
         public void RowSetIteratedTwice()
         {
-            ISession session = TestClusterManager.GetTestCluster(1).Session;
+            ISession session = TestClusterManager.GetNonShareableTestCluster(1).Session;
             string keyspace = "TestKeyspace_" + Randomm.RandomAlphaNum(10);
             string table = "TestTable_" + Randomm.RandomAlphaNum(10);
             string key = "1";
@@ -392,7 +356,7 @@ namespace Cassandra.IntegrationTests.Core
         [Test]
         public void RowSetPagingAfterSessionDispose()
         {
-            ISession session = TestClusterManager.GetTestCluster(1).Session;
+            ISession session = TestClusterManager.GetNonShareableTestCluster(1).Session;
             string keyspace = "TestKeyspace_" + Randomm.RandomAlphaNum(10);
             string table = "TestTable_" + Randomm.RandomAlphaNum(10);
 
@@ -418,19 +382,106 @@ namespace Cassandra.IntegrationTests.Core
             Assert.AreEqual(1, rs.InnerQueueCount);
         }
 
+        [Test]
+        public void WriteFailureExceptionTest()
+        {
+            if (TestClusterManager.CassandraVersion < Version.Parse("2.2"))
+            {
+                Assert.Ignore("Write failure error were introduced in Cassandra 2.2");
+            }
+            const string keyspace = "ks_wfail";
+            const string table = keyspace + ".tbl1";
+            var testCluster = TestClusterManager.GetTestCluster(2, 0, false, DefaultMaxClusterCreateRetries, false, false);
+            testCluster.Start(1, "--jvm_arg=-Dcassandra.test.fail_writes_ks=" + keyspace);
+            testCluster.Start(2);
+            using (var cluster = Cluster.Builder().AddContactPoint(testCluster.InitialContactPoint).Build())
+            {
+                var session = cluster.Connect();
+                session.Execute(String.Format(TestUtils.CreateKeyspaceSimpleFormat, keyspace, 2));
+                session.Execute(String.Format(TestUtils.CreateTableSimpleFormat, table));
+                var query = String.Format("INSERT INTO {0} (k, t) VALUES ('ONE', 'ONE VALUES')", table);
+                Assert.Throws<WriteFailureException>(() => 
+                    session.Execute(new SimpleStatement(query).SetConsistencyLevel(ConsistencyLevel.All)));
+            }
+        }
+
+        [Test]
+        public void ReadFailureExceptionTest()
+        {
+            if (TestClusterManager.CassandraVersion < Version.Parse("2.2"))
+            {
+                Assert.Ignore("Read failure error were introduced in Cassandra 2.2");
+            }
+            const string keyspace = "ks_rfail";
+            const string table = keyspace + ".tbl1";
+            var testCluster = TestClusterManager.GetTestCluster(2, 0, false, DefaultMaxClusterCreateRetries, false, false);
+            testCluster.UpdateConfig("tombstone_failure_threshold: 1000");
+            TestHelper.ParallelInvoke(new Action[]
+            {
+                () => testCluster.Start(1),
+                () => testCluster.Start(2)
+            });
+            var builder = Cluster
+                .Builder()
+                .WithLoadBalancingPolicy(new WhiteListLoadBalancingPolicy(2))
+                .AddContactPoint(testCluster.ClusterIpPrefix + "2");
+            using (var cluster = builder.Build())
+            {
+                var session = cluster.Connect();
+                session.Execute(String.Format(TestUtils.CreateKeyspaceSimpleFormat, keyspace, 1));
+                session.Execute(String.Format("CREATE TABLE {0} (pk int, cc int, v int, primary key (pk, cc))", table));
+                // The rest of the test relies on the fact that the PK '1' will be placed on node1 with MurmurPartitioner
+                var ps = session.Prepare(String.Format("INSERT INTO {0} (pk, cc, v) VALUES (1, ?, null)", table));
+                var counter = 0;
+                TestHelper.ParallelInvoke(() =>
+                {
+                    var rs = session.Execute(ps.Bind(Interlocked.Increment(ref counter)));
+                    Assert.AreEqual(2, TestHelper.GetLastAddressByte(rs.Info.QueriedHost));
+                }, 1100);
+                Assert.Throws<ReadFailureException>(() => 
+                    session.Execute(String.Format("SELECT * FROM {0} WHERE pk = 1", table)));
+            }
+        }
+
+        [Test]
+        public void FunctionFailureExceptionTest()
+        {
+            if (TestClusterManager.CassandraVersion < Version.Parse("2.2"))
+            {
+                Assert.Ignore("Function failure error were introduced in Cassandra 2.2");
+            }
+            var testCluster = TestClusterManager.GetTestCluster(1, 0, false, DefaultMaxClusterCreateRetries, false, false);
+            testCluster.UpdateConfig("enable_user_defined_functions: true");
+            testCluster.Start(1);
+            var builder = Cluster
+                .Builder()
+                .AddContactPoint(testCluster.InitialContactPoint);
+            using (var cluster = builder.Build())
+            {
+                var session = cluster.Connect();
+                session.Execute(String.Format(TestUtils.CreateKeyspaceSimpleFormat, "ks_func", 1));
+                session.Execute("CREATE TABLE ks_func.tbl1 (id int PRIMARY KEY, v1 int, v2 int)");
+                session.Execute("INSERT INTO ks_func.tbl1 (id, v1, v2) VALUES (1, 1, 0)");
+                session.Execute("CREATE FUNCTION ks_func.div(a int, b int) RETURNS NULL ON NULL INPUT RETURNS int LANGUAGE java AS 'return a / b;'");
+
+                Assert.Throws<FunctionFailureException>(() =>
+                    session.Execute("SELECT ks_func.div(v1,v2) FROM ks_func.tbl1 where id = 1"));
+            }
+        }
+
         ///////////////////////
         /// Helper Methods
         ///////////////////////
 
-        public static void PreserveStackTraceAssertions()
+        public static void PreserveStackTraceOnConnectAndAssert()
         {
-            var cluster = Cluster.Builder().AddContactPoint("127.0.0.1").Build();
-            var session = cluster.Connect();
+            var ex = Assert.Throws<SecurityException>(() => Cluster.Builder().AddContactPoint(_lastKnownInitialContactPoint).Build());
+            string stackTrace = ex.StackTrace;
 
-            var ex = Assert.Throws<SyntaxError>(() => session.Execute("SELECT WILL FAIL"));
             //Must maintain the original call stack trace
-            Assert.True(ex.StackTrace.Contains("PreserveStackTraceAssertions"));
-            Assert.True(ex.StackTrace.Contains("ExceptionsTests"));
+            StringAssert.Contains("PreserveStackTraceOnConnectAndAssert", stackTrace);
+            StringAssert.Contains("ExceptionsTests", stackTrace);
+            StringAssert.Contains("Cassandra.Utils.ResolveHostByName", stackTrace); // something actually from the Cassandra library
         }
 
         public static AppDomain CreatePartialTrustDomain()
@@ -443,5 +494,31 @@ namespace Cassandra.IntegrationTests.Core
             return AppDomain.CreateDomain("Partial Trust AppDomain", null, setup, permissions);
         }
 
+        private class WhiteListLoadBalancingPolicy: ILoadBalancingPolicy
+        {
+            private readonly ILoadBalancingPolicy _childPolicy = new RoundRobinPolicy();
+            private readonly byte[] _list;
+
+            public WhiteListLoadBalancingPolicy(params byte[] listLastOctet)
+            {
+                _list = listLastOctet;
+            }
+
+            public void Initialize(ICluster cluster)
+            {
+                _childPolicy.Initialize(cluster);
+            }
+
+            public HostDistance Distance(Host host)
+            {
+                return _childPolicy.Distance(host);
+            }
+
+            public IEnumerable<Host> NewQueryPlan(string keyspace, IStatement query)
+            {
+                var hosts = _childPolicy.NewQueryPlan(keyspace, query);
+                return hosts.Where(h => _list.Contains(TestHelper.GetLastAddressByte(h)));
+            }
+        }
     }
 }

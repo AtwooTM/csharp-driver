@@ -16,7 +16,10 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Cassandra.Data.Linq;
+using NUnit.Framework;
+#pragma warning disable 618
 
 namespace Cassandra.IntegrationTests.Linq.Structures
 {
@@ -36,6 +39,9 @@ namespace Cassandra.IntegrationTests.Linq.Structures
 
         [Column("date_time_type")]
         public DateTime DateTimeType { get; set; }
+
+        [Column("nullable_date_time_type")]
+        public DateTime? NullableDateTimeType { get; set; }
 
         [Column("date_time_offset_type")]
         public DateTimeOffset DateTimeOffsetType { get; set; }
@@ -92,12 +98,12 @@ namespace Cassandra.IntegrationTests.Linq.Structures
 
         public static List<AllDataTypesEntity> GetDefaultAllDataTypesList()
         {
-            List<AllDataTypesEntity> movieList = new List<AllDataTypesEntity>();
+            List<AllDataTypesEntity> objectList = new List<AllDataTypesEntity>();
             for (int i = 0; i < DefaultListLength; i++)
             {
-                movieList.Add(GetRandomInstance());
+                objectList.Add(GetRandomInstance());
             }
-            return movieList;
+            return objectList;
         }
 
         public static List<AllDataTypesEntity> SetupDefaultTable(ISession session)
@@ -113,6 +119,46 @@ namespace Cassandra.IntegrationTests.Linq.Structures
 
             return allDataTypesRandomList;
         }
+
+        public static AllDataTypesEntity WriteReadValidate(Table<AllDataTypesEntity> table)
+        {
+            WriteReadValidateUsingSessionBatch(table);
+            return WriteReadValidateUsingTableMethods(table);
+        }
+
+        private static AllDataTypesEntity WriteReadValidateUsingTableMethods(Table<AllDataTypesEntity> table)
+        {
+            AllDataTypesEntity expectedDataTypesEntityRow = AllDataTypesEntity.GetRandomInstance();
+            string uniqueKey = expectedDataTypesEntityRow.StringType;
+
+            // insert record
+            table.GetSession().Execute(table.Insert(expectedDataTypesEntityRow));
+
+            // select record
+            List<AllDataTypesEntity> listOfAllDataTypesObjects = (from x in table where x.StringType.Equals(uniqueKey) select x).Execute().ToList();
+            Assert.NotNull(listOfAllDataTypesObjects);
+            Assert.AreEqual(1, listOfAllDataTypesObjects.Count);
+            AllDataTypesEntity actualDataTypesEntityRow = listOfAllDataTypesObjects.First();
+            expectedDataTypesEntityRow.AssertEquals(actualDataTypesEntityRow);
+            return expectedDataTypesEntityRow;
+        }
+
+        private static AllDataTypesEntity WriteReadValidateUsingSessionBatch(Table<AllDataTypesEntity> table)
+        {
+            Batch batch = table.GetSession().CreateBatch();
+            AllDataTypesEntity expectedDataTypesEntityRow = AllDataTypesEntity.GetRandomInstance();
+            string uniqueKey = expectedDataTypesEntityRow.StringType;
+            batch.Append(table.Insert(expectedDataTypesEntityRow));
+            batch.Execute();
+
+            List<AllDataTypesEntity> listOfAllDataTypesObjects = (from x in table where x.StringType.Equals(uniqueKey) select x).Execute().ToList();
+            Assert.NotNull(listOfAllDataTypesObjects);
+            Assert.AreEqual(1, listOfAllDataTypesObjects.Count);
+            AllDataTypesEntity actualDataTypesEntityRow = listOfAllDataTypesObjects.First();
+            expectedDataTypesEntityRow.AssertEquals(actualDataTypesEntityRow);
+            return expectedDataTypesEntityRow;
+        }
+
 
     }
 }

@@ -10,10 +10,10 @@ namespace Cassandra.Tests.Mapping.TestData
     {
         private const int ProtocolVersion = 2;
 
-        public static List<PlainUser> GetUserList()
+        public static List<PlainUser> GetUserList(int length = 10)
         {
             // Generate some random users
-            return Enumerable.Range(1, 10).Select(idx => new PlainUser
+            return Enumerable.Range(1, length).Select(idx => new PlainUser
             {
                 UserId = Guid.NewGuid(),
                 Name = string.Format("Name {0}", idx),
@@ -31,7 +31,10 @@ namespace Cassandra.Tests.Mapping.TestData
             }).ToList();
         }
 
-        public static RowSet GetSingleValueRowSet<T>(string columnName, T value)
+        /// <summary>
+        /// Returns a RowSet with 1 column
+        /// </summary>
+        public static RowSet GetSingleColumnRowSet<T>(string columnName, T[] values)
         {
             var rs = new RowSet();
             IColumnInfo typeInfo;
@@ -42,11 +45,20 @@ namespace Cassandra.Tests.Mapping.TestData
             };
             var columnIndexes = rs.Columns.ToDictionary(c => c.Name, c => c.Index);
 
-            var values = new List<object> { value }
-                .Select(v => TypeCodec.Encode(ProtocolVersion, v));
-            var row = new Row(ProtocolVersion, values.ToArray(), rs.Columns, columnIndexes);
-            rs.AddRow(row);
+            foreach (var v in values)
+            {
+                var row = new Row(new object[] { v}, rs.Columns, columnIndexes);
+                rs.AddRow(row);
+            }
             return rs;
+        }
+
+        /// <summary>
+        /// Returns a RowSet with a single column and row
+        /// </summary>
+        public static RowSet GetSingleValueRowSet<T>(string columnName, T value)
+        {
+            return GetSingleColumnRowSet(columnName, new T[] { value });
         }
 
         public static RowSet CreateMultipleValuesRowSet<T>(string[] columnNames, T[] genericValues, int rowLength = 1)
@@ -56,7 +68,17 @@ namespace Cassandra.Tests.Mapping.TestData
             for (var i = 0; i < columnNames.Length; i++)
             {
                 IColumnInfo typeInfo;
-                var typeCode = TypeCodec.GetColumnTypeCodeInfo(typeof(T), out typeInfo);
+                var type = typeof (T);
+                if (type == typeof (Object))
+                {
+                    //Try to guess by value
+                    if (genericValues[i] == null)
+                    {
+                        throw new Exception("Test data could not be generated, value at index " + i + " could not be encoded");
+                    }
+                    type = genericValues[i].GetType();
+                }
+                var typeCode = TypeCodec.GetColumnTypeCodeInfo(type, out typeInfo);
                 rs.Columns[i] =
                     new CqlColumn { Name = columnNames[i], TypeCode = typeCode, TypeInfo = typeInfo, Type = typeof(T), Index = i };
             }
@@ -64,9 +86,9 @@ namespace Cassandra.Tests.Mapping.TestData
             for (var i = 0; i < rowLength; i++)
             {
                 var values = genericValues
-                    .Select(v => TypeCodec.Encode(ProtocolVersion, v))
+                    .Select(v => (object)v)
                     .ToArray();
-                var row = new Row(ProtocolVersion, values, rs.Columns, columnIndexes);
+                var row = new Row(values, rs.Columns, columnIndexes);
                 rs.AddRow(row);   
             }
             return rs;
@@ -94,7 +116,7 @@ namespace Cassandra.Tests.Mapping.TestData
             var columnIndexes = rs.Columns.ToDictionary(c => c.Name, c => c.Index);
             foreach (var user in users)
             {
-                var values = new List<object>
+                var values = new object[]
                 {
                     user.UserId,
                     user.Name,
@@ -102,15 +124,15 @@ namespace Cassandra.Tests.Mapping.TestData
                     user.CreatedDate,
                     user.IsActive,
                     user.LastLoginDate,
-                    user.LoginHistory,
-                    user.LuckyNumbers,
+                    user.LoginHistory.ToArray(),
+                    user.LuckyNumbers.ToArray(),
                     user.ChildrenAges,
                     (int)user.FavoriteColor,
                     (int?)user.TypeOfUser,
                     (int)user.PreferredContactMethod,
                     (int?)user.HairColor
-                }.Select(v => TypeCodec.Encode(ProtocolVersion, v));
-                var row = new Row(ProtocolVersion, values.ToArray(), rs.Columns, columnIndexes);
+                };
+                var row = new Row(values, rs.Columns, columnIndexes);
                 rs.AddRow(row);
             }
             return rs;

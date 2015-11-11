@@ -76,7 +76,7 @@ namespace Cassandra.Mapping.Statements
         /// <summary>
         /// Generates an "INSERT INTO tablename (columns) VALUES (?)" statement for a POCO of Type T.
         /// </summary>
-        public string GenerateInsert<T>()
+        public string GenerateInsert<T>(bool ifNotExists = false)
         {
             var pocoData = _pocoDataFactory.GetPocoData<T>();
 
@@ -85,7 +85,7 @@ namespace Cassandra.Mapping.Statements
 
             var columns = pocoData.Columns.Select(Escape(pocoData)).ToCommaDelimitedString();
             var placeholders = Enumerable.Repeat("?", pocoData.Columns.Count).ToCommaDelimitedString();
-            return string.Format("INSERT INTO {0} ({1}) VALUES ({2})", Escape(pocoData.TableName, pocoData), columns, placeholders);
+            return string.Format("INSERT INTO {0} ({1}) VALUES ({2}){3}", Escape(pocoData.TableName, pocoData), columns, placeholders, ifNotExists ? " IF NOT EXISTS" : null);
         }
         
         /// <summary>
@@ -159,7 +159,7 @@ namespace Cassandra.Mapping.Statements
         /// <summary>
         /// Gets the CQL queries involved in a table creation (CREATE TABLE, CREATE INDEX)
         /// </summary>
-        public static List<string> GetCreate(PocoData pocoData, bool ifNotExists)
+        public static List<string> GetCreate(PocoData pocoData, string tableName, string keyspaceName, bool ifNotExists)
         {
             if (pocoData == null)
             {
@@ -173,11 +173,11 @@ namespace Cassandra.Mapping.Statements
             var commands = new List<string>();
             var secondaryIndexes = new List<string>();
             var createTable = new StringBuilder("CREATE TABLE ");
-            var tableName = Escape(pocoData.TableName, pocoData);
-            if (pocoData.KeyspaceName != null)
+            tableName = Escape(tableName, pocoData);
+            if (keyspaceName != null)
             {
                 //Use keyspace.tablename notation
-                tableName = Escape(pocoData.KeyspaceName, pocoData) + "." + tableName;
+                tableName = Escape(keyspaceName, pocoData) + "." + tableName;
             }
             createTable.Append(tableName);
             createTable.Append(" (");

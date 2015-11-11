@@ -29,13 +29,21 @@ namespace Cassandra.Tests
             return GetCluster(new Configuration());
         }
 
+        private ControlConnection NewInstance(Configuration config, Metadata metadata)
+        {
+            return new ControlConnection((byte)Cluster.MaxProtocolVersion, config, metadata);
+        }
+
+        private ControlConnection NewInstance(Metadata metadata)
+        {
+            return NewInstance(new Configuration(), metadata);
+        }
+
         [Test]
         public void UpdateLocalNodeInfoModifiesHost()
         {
-            var rp = new ConstantReconnectionPolicy(1000);
-            var metadata = new Metadata(rp);
-            var config = new Configuration();
-            var cc = new ControlConnection(GetCluster(), metadata);
+            var metadata = new Metadata(new Configuration());
+            var cc = NewInstance(metadata);
             cc.Host = TestHelper.CreateHost("127.0.0.1");
             var row = TestHelper.CreateRow(new Dictionary<string, object>
             {
@@ -50,10 +58,8 @@ namespace Cassandra.Tests
         [Test]
         public void UpdatePeersInfoModifiesPool()
         {
-            var rp = new ConstantReconnectionPolicy(1000);
-            var metadata = new Metadata(rp);
-            var config = new Configuration();
-            var cc = new ControlConnection(GetCluster(), metadata);
+            var metadata = new Metadata(new Configuration());
+            var cc = NewInstance(metadata);
             cc.Host = TestHelper.CreateHost("127.0.0.1");
             metadata.AddHost(cc.Host.Address);
             var hostAddress2 = IPAddress.Parse("127.0.0.2");
@@ -80,9 +86,8 @@ namespace Cassandra.Tests
         [Test]
         public void UpdatePeersInfoWithNullRpcIgnores()
         {
-            var rp = new ConstantReconnectionPolicy(1000);
-            var metadata = new Metadata(rp);
-            var cc = new ControlConnection(GetCluster(), metadata);
+            var metadata = new Metadata(new Configuration());
+            var cc = NewInstance(metadata);
             cc.Host = TestHelper.CreateHost("127.0.0.1");
             metadata.AddHost(cc.Host.Address);
             var rows = TestHelper.CreateRows(new List<Dictionary<string, object>>
@@ -104,9 +109,8 @@ namespace Cassandra.Tests
                 .Callback<IPEndPoint>(invokedEndPoints.Add)
                 .Returns<IPEndPoint>(e => e);
             const int portNumber = 9999;
-            var rp = new ConstantReconnectionPolicy(1000);
-            var metadata = new Metadata(rp);
-            var config = new Configuration(new Policies(),
+            var metadata = new Metadata(new Configuration());
+            var config = new Configuration(Policies.DefaultPolicies,
                  new ProtocolOptions(portNumber),
                  null,
                  new SocketOptions(),
@@ -115,7 +119,7 @@ namespace Cassandra.Tests
                  null,
                  new QueryOptions(),
                  translatorMock.Object);
-            var cc = new ControlConnection(GetCluster(config), metadata);
+            var cc = NewInstance(config, metadata);
             cc.Host = TestHelper.CreateHost("127.0.0.1");
             metadata.AddHost(cc.Host.Address);
             var hostAddress2 = IPAddress.Parse("127.0.0.2");

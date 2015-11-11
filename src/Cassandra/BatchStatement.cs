@@ -16,6 +16,8 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using Cassandra.Requests;
 
 namespace Cassandra
 {
@@ -26,7 +28,8 @@ namespace Cassandra
     {
         private readonly List<Statement> _queries = new List<Statement>();
         private BatchType _batchType = BatchType.Logged;
-        private volatile RoutingKey _routingKey;
+        private RoutingKey _routingKey;
+        private object[] _routingValues;
 
         /// <summary>
         /// Gets the batch type
@@ -50,14 +53,29 @@ namespace Cassandra
         }
 
         /// <summary>
-        ///  Gets the routing key for the query. <p> Note that unless the routing key has been
-        ///  explicitly set through <link>#setRoutingKey</link>, this will method will
-        ///  return <c>null</c> (to avoid having to parse the query string to
-        ///  retrieve the partition key).</p>
+        /// Gets the routing key for the query.
+        /// <para>
+        /// Routing key can be provided using the <see cref="SetRoutingValues"/> method.
+        /// </para>
         /// </summary>
         public override RoutingKey RoutingKey
         {
-            get { return _routingKey; }
+            get
+            {
+                if (_routingKey != null)
+                {
+                    return _routingKey;
+                }
+                if (_routingValues == null)
+                {
+                    return null;
+                }
+                //Calculate the routing key
+                return RoutingKey.Compose(
+                    _routingValues
+                    .Select(key => new RoutingKey(TypeCodec.Encode(ProtocolVersion, key)))
+                    .ToArray());
+            }
         }
 
         /// <summary>
@@ -77,14 +95,31 @@ namespace Cassandra
         }
 
         /// <summary>
+        /// Sets the partition key values in order to route the query to the correct replicas.
+        /// <para>For simple partition keys, set the partition key value.</para>
+        /// <para>For composite partition keys, set the multiple the partition key values in correct order.</para>
+        /// </summary>
+        public BatchStatement SetRoutingValues(params object[] keys)
+        {
+            _routingValues = keys;
+            return this;
+        }
+
+        /// <summary>
         /// Adds a new statement to this batch.
         /// Note that statement can be any <c>Statement</c>. It is allowed to mix <see cref="SimpleStatement"/> and <see cref="BoundStatement"/> in the same <c>BatchStatement</c> in particular.
         /// Please note that the options of the added <c>Statement</c> (all those defined directly by the Statement class: consistency level, fetch size, tracing, ...) will be ignored for the purpose of the execution of the Batch. Instead, the options used are the one of this <c>BatchStatement</c> object.
         /// </summary>
         /// <param name="statement">Statement to add to the batch</param>
         /// <returns>The Batch statement</returns>
+        /// <exception cref="System.ArgumentOutOfRangeException">Thrown when trying to add more than <c>short.MaxValue</c> Statements</exception>
         public BatchStatement Add(Statement statement)
         {
+            if (_queries.Count > short.MaxValue)
+            {
+                //see BatchMessage.codec field in BatchMessage.java in server code, and BatchRequest.GetFrame in this driver
+                throw new ArgumentOutOfRangeException(string.Format("There can be only {0} child statement in a batch statement accordung to the cassandra native protocol", short.MaxValue));
+            }
             _queries.Add(statement);
             return this;
         }
